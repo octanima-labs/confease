@@ -30,11 +30,11 @@ class Parser:
     
     @staticmethod
     def save(path: str | Path, data: Mapping[str, Any], **kwargs):
-        raise NotImplementedError("This parser does not support saving yet")
+        raise NotImplementedError("This parser is not implemented for saving yet")
     
     @staticmethod
     def load(path: str | Path, **kwargs) -> dict[str, Any]:
-        raise NotImplementedError("This parser does not support loading yet")
+        raise NotImplementedError("This parser is not implemented for loading yet")
     
 class Yaml(Parser):
     extensions = (YAML, YML)

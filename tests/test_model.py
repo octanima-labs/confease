@@ -49,9 +49,9 @@ def test_get_returns_default_for_missing_key():
 def test_get_casts_values_and_keeps_string_on_cast_failure():
     conf = Confease(NUMBER=1312)
 
-    assert conf.get("NUMBER") == "1312"
+    assert conf.get("NUMBER") == 1312
     assert conf.get("NUMBER", cast=int) == 1312
-    assert conf.get("NUMBER", cast=dict) == "1312"
+    assert conf.get("NUMBER", cast=dict) == 1312
 
 
 def test_get_item_returns_confitem():
@@ -66,10 +66,10 @@ def test_set_adds_and_updates_user_origin_values():
     conf = Confease()
 
     conf.set("KEY", 1)
-    assert conf.get_item("KEY") == Confitem("KEY", "1", USR)
+    assert conf.get_item("KEY") == Confitem("KEY", 1, USR)
 
     conf.set("KEY", 2)
-    assert conf.get_item("KEY") == Confitem("KEY", "2", USR)
+    assert conf.get_item("KEY") == Confitem("KEY", 2, USR)
 
 
 def test_incoming_higher_priority_origin_replaces_existing_item():
@@ -106,7 +106,7 @@ def test_existing_yaml_file_loads_on_init_with_defaults(tmp_path):
     conf = Confease(path, APP_DIR="~/Apps", OTHER="default")
 
     assert conf.get_item("APP_DIR") == Confitem("APP_DIR", "/tmp/app", USR)
-    assert conf.get_item("NUMBER") == Confitem("NUMBER", "3", USR)
+    assert conf.get_item("NUMBER") == Confitem("NUMBER", 3, USR)
     assert conf.get_item("OTHER") == Confitem("OTHER", "default", DEF)
 
 
@@ -164,6 +164,77 @@ def test_yml_file_loads_when_parser_is_inferred(tmp_path):
     assert conf.get_item("KEY") == Confitem("KEY", "value", USR)
 
 
+def test_nested_defaults_support_dotted_and_section_access():
+    conf = Confease(**{"database": {"host": "localhost", "port": 5432}})
+
+    assert conf.get("database.host") == "localhost"
+    assert conf.get("database.port") == 5432
+    assert conf.get("database") == {"host": "localhost", "port": 5432}
+
+
+def test_set_supports_nested_dict_values():
+    conf = Confease()
+
+    conf.set("database", {"host": "localhost", "port": 5432})
+
+    assert conf.get_item("database.host") == Confitem("database.host", "localhost", USR)
+    assert conf.get_item("database.port") == Confitem("database.port", 5432, USR)
+    assert conf.get("database") == {"host": "localhost", "port": 5432}
+
+
+def test_set_supports_dotted_nested_keys():
+    conf = Confease()
+
+    conf.set("database.host", "localhost")
+
+    assert conf.get("database.host") == "localhost"
+    assert conf.get("database") == {"host": "localhost"}
+
+
+def test_yaml_load_flattens_nested_mapping_into_leaf_items(tmp_path):
+    path = tmp_path / "conf.yaml"
+    path.write_text("database:\n  host: localhost\n  port: 5432\n")
+
+    conf = Confease(path)
+
+    assert conf.get_item("database.host") == Confitem("database.host", "localhost", USR)
+    assert conf.get_item("database.port") == Confitem("database.port", 5432, USR)
+    assert conf.get("database") == {"host": "localhost", "port": 5432}
+
+
+def test_yaml_save_nests_dotted_leaf_items(tmp_path):
+    path = tmp_path / "conf.yaml"
+    conf = Confease(path)
+
+    conf.set("database.host", "localhost")
+    conf.set("database.port", 5432)
+    conf.save()
+
+    assert yaml.safe_load(path.read_text()) == {"database": {"host": "localhost", "port": 5432}}
+
+
+def test_scalar_and_nested_key_collisions_raise_errors():
+    conf = Confease()
+
+    conf.set("database.host", "localhost")
+    with pytest.raises(ValueError, match="collides"):
+        conf.set("database", "sqlite")
+
+    other = Confease()
+    other.set("database", "sqlite")
+    with pytest.raises(ValueError, match="collides"):
+        other.set("database.host", "localhost")
+
+
+def test_nested_keys_support_one_level_only():
+    conf = Confease()
+
+    with pytest.raises(ValueError, match="one level"):
+        conf.set("a.b.c", "value")
+    with pytest.raises(ValueError, match="one level"):
+        conf.set("a", {"b": {"c": "value"}})
+
+
 def test_unsupported_parser_raises_for_persistence(tmp_path):
     path = tmp_path / "conf.json"
     path.write_text('{"KEY": "value"}')
@@ -181,10 +252,10 @@ def test_unsupported_parser_raises_for_persistence(tmp_path):
 def test_yaml_parser_loads_and_saves_plain_mapping(tmp_path):
     path = tmp_path / "conf.yaml"
 
-    Yaml.save(path, {"KEY": "value"})
+    Yaml.save(path, {"KEY": "value", "database": {"host": "localhost"}})
 
-    assert Yaml.load(path) == {"KEY": "value"}
-    assert yaml.safe_load(path.read_text()) == {"KEY": "value"}
+    assert Yaml.load(path) == {"KEY": "value", "database": {"host": "localhost"}}
+    assert yaml.safe_load(path.read_text()) == {"KEY": "value", "database": {"host": "localhost"}}
 
 
 def test_yaml_parser_rejects_non_mapping_files(tmp_path):

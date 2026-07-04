@@ -12,7 +12,9 @@ Conf is overriden in this way:
 CLI > ENV > USER CONF > DEFAULT CONF
 """
 from argparse import Namespace
+from collections.abc import Mapping
 from pathlib import Path
+from typing import Any
 
 from confease.parsers import PARSER_CLASSES, PARSERS, Parser, Yaml
 
@@ -32,9 +34,9 @@ ORIGINS = [
 ]
 
 class Confitem:
-    def __init__(self, key: str, value, origin: str):
+    def __init__(self, key: str, value: Any, origin: str):
         self._key = str(key)
-        self._value = str(value)
+        self._value = value
         if origin in ORIGINS:
             self._origin = origin
         else:
@@ -64,7 +66,7 @@ class Confitem:
         return f"Confitem<{self._key}, {self._value}, {self._origin}>"
     
     def __str__(self):
-        return self._value
+        return str(self._value)
     
 
 
@@ -76,7 +78,7 @@ class Confease:
         else:
             self._path = Path(path).expanduser()
         self._reload = bool(reload) # if reload, changes are saved instantly and each time conf is accessed, it is readed from file; in this way the conf 'reloads' itself
-        self._defaults: list[Confitem] = [Confitem(k, v, DEF) for k, v in kwargs.items()]
+        self._defaults: list[Confitem] = [Confitem(k, v, DEF) for k, v in self._flatten_mapping(kwargs).items()]
         self._entries: list[Confitem] | None = None
         self._preference: list[str] | None = None
         self._template: Path | None = None
@@ -128,7 +130,84 @@ class Confease:
             raise RuntimeError("Preference was not initialized")
         return self._preference.index(origin)
 
-    def _set_item(self, key: str, value, origin: str, *, force: bool = False):
+    @staticmethod
+    def _validate_key(key: str):
+        parts = key.split(".")
+        if len(parts) > 2 or any(part == "" for part in parts):
+            raise ValueError(f"Nested configuration keys support one level only: {key}")
+
+    @classmethod
+    def _ensure_no_key_collisions(cls, keys):
+        scalar_keys: set[str] = set()
+        section_keys: set[str] = set()
+        for key in keys:
+            cls._validate_key(key)
+            parts = key.split(".")
+            if len(parts) == 1:
+                scalar_keys.add(key)
+            else:
+                section_keys.add(parts[0])
+        collisions = sorted(scalar_keys & section_keys)
+        if collisions:
+            raise ValueError(f"Configuration key collides with nested section: {collisions}")
+
+    @classmethod
+    def _flatten_mapping(cls, data: Mapping[str, Any]) -> dict[str, Any]:
+        flat: dict[str, Any] = {}
+
+        def add_item(key: str, value: Any):
+            cls._validate_key(key)
+            if key in flat:
+                raise ValueError(f"Duplicate configuration key: {key}")
+            flat[key] = value
+
+        for raw_key, value in data.items():
+            key = str(raw_key)
+            if isinstance(value, Mapping):
+                if "." in key:
+                    raise ValueError(f"Nested configuration keys support one level only: {key}")
+                for raw_subkey, subvalue in value.items():
+                    if isinstance(subvalue, Mapping):
+                        raise ValueError(f"Nested configuration keys support one level only: {key}.{raw_subkey}")
+                    add_item(f"{key}.{raw_subkey}", subvalue)
+            else:
+                add_item(key, value)
+
+        cls._ensure_no_key_collisions(flat.keys())
+        return flat
+
+    @classmethod
+    def _nest_mapping(cls, data: Mapping[str, Any]) -> dict[str, Any]:
+        cls._ensure_no_key_collisions(data.keys())
+        nested: dict[str, Any] = {}
+        for key, value in data.items():
+            parts = key.split(".")
+            if len(parts) == 1:
+                nested[key] = value
+            else:
+                parent, child = parts
+                section = nested.setdefault(parent, {})
+                if not isinstance(section, dict):
+                    raise ValueError(f"Configuration key collides with nested section: {parent}")
+                section[child] = value
+        return nested
+
+    def _ensure_key_does_not_collide(self, key: str):
+        self._validate_key(key)
+        if self._entries is None:
+            return
+        parts = key.split(".")
+        if len(parts) == 1:
+            prefix = f"{key}."
+            if any(entry.key.startswith(prefix) for entry in self._entries):
+                raise ValueError(f"Configuration key collides with nested section: {key}")
+        else:
+            parent = parts[0]
+            if any(entry.key == parent for entry in self._entries):
+                raise ValueError(f"Configuration key collides with nested section: {parent}")
+
+    def _set_item(self, key: str, value: Any, origin: str, *, force: bool = False):
+        self._ensure_key_does_not_collide(key)
         incoming = Confitem(key, value, origin)
         if self._entries is None:
             self.reset()
@@ -152,7 +231,7 @@ class Confease:
         data = self._parser.load(load_path)
 
         self._entries = list(self._defaults)
-        for key, value in data.items():
+        for key, value in self._flatten_mapping(data).items():
             self._set_item(str(key), value, USR, force=True)
         return
     
@@ -162,7 +241,7 @@ class Confease:
 
         self._path.parent.mkdir(parents=True, exist_ok=True)
         entries = self._entries or []
-        data = {entry.key: entry.value for entry in entries if entry.origin == USR}
+        data = self._nest_mapping({entry.key: entry.value for entry in entries if entry.origin == USR})
         self._parser.save(self._path, data)
 
     def reset(self):
@@ -177,9 +256,9 @@ class Confease:
 
     def get(self, key: str, default = None, cast = None):
         item = self.get_item(key)
-        if item is None:
+        val = item.value if item is not None else self._get_section(key)
+        if val is None:
             return default
-        val = item.value
         if cast:
             try:
                 val = cast(val)
@@ -199,8 +278,18 @@ class Confease:
                 return entry
         return None
 
-    def set(self, key: str, value: str):
-        self._set_item(key, value, USR, force=True)
+    def _get_section(self, key: str) -> dict[str, Any] | None:
+        if self._entries is None:
+            return None
+        self._validate_key(key)
+        prefix = f"{key}."
+        section = {entry.key.removeprefix(prefix): entry.value for entry in self._entries if entry.key.startswith(prefix)}
+        return section or None
+
+    def set(self, key: str, value: Any):
+        items = self._flatten_mapping({key: value})
+        for item_key, item_value in items.items():
+            self._set_item(item_key, item_value, USR, force=True)
         if self._reload:
             self.save()
     
