@@ -136,6 +136,40 @@ def test_save_writes_only_user_entries(tmp_path):
     assert yaml.safe_load(path.read_text()) == {"USER": "value"}
 
 
+def test_save_can_write_default_entries_when_user_only_is_false(tmp_path):
+    path = tmp_path / "conf.yaml"
+    conf = Confease(path, DEFAULT="default")
+
+    conf.save(user_only=False)
+
+    assert yaml.safe_load(path.read_text()) == {"DEFAULT": "default"}
+
+
+def test_save_can_write_entries_from_all_origins(tmp_path):
+    path = tmp_path / "conf.yaml"
+    conf = Confease(path, DEFAULT="default")
+
+    conf.set("USER", "value")
+    conf._set_item("CLI_VALUE", "cli", CLI)
+    conf.save(user_only=False)
+
+    assert yaml.safe_load(path.read_text()) == {
+        "CLI_VALUE": "cli",
+        "DEFAULT": "default",
+        "USER": "value",
+    }
+
+
+def test_save_can_write_nested_entries_from_all_origins(tmp_path):
+    path = tmp_path / "conf.yaml"
+    conf = Confease(path, **{"database": {"host": "default"}})
+
+    conf.set("database.port", 5432)
+    conf.save(user_only=False)
+
+    assert yaml.safe_load(path.read_text()) == {"database": {"host": "default", "port": 5432}}
+
+
 def test_save_creates_parent_directories(tmp_path):
     path = tmp_path / "nested" / "configs" / "conf.yaml"
     conf = Confease(path)

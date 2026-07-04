@@ -235,13 +235,17 @@ class Confease:
             self._set_item(str(key), value, USR, force=True)
         return
     
-    def save(self):
+    def save(self, user_only: bool = True):
         if self._path is None:
             return
 
+        if self._entries is None:
+            self.reset()
         self._path.parent.mkdir(parents=True, exist_ok=True)
         entries = self._entries or []
-        data = self._nest_mapping({entry.key: entry.value for entry in entries if entry.origin == USR})
+        data = self._nest_mapping(
+            {entry.key: entry.value for entry in entries if not user_only or entry.origin == USR}
+        )
         self._parser.save(self._path, data)
 
     def reset(self):
