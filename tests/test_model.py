@@ -319,6 +319,47 @@ def test_set_supports_dotted_nested_keys():
     assert conf.get("database") == {"host": "localhost"}
 
 
+def test_indexed_access_returns_values_and_none_for_missing_keys():
+    conf = Confease(KEY="value")
+
+    assert conf["KEY"] == "value"
+    assert conf["MISSING"] is None
+
+
+def test_indexed_assignment_mirrors_set_behavior():
+    conf = Confease()
+
+    conf["KEY"] = 1
+    assert conf.get_item("KEY") == Confitem("KEY", 1, USR)
+
+    conf["KEY"] = 2
+    assert conf.get_item("KEY") == Confitem("KEY", 2, USR)
+
+
+def test_indexed_assignment_supports_nested_dict_values():
+    conf = Confease()
+
+    conf["database"] = {"host": "localhost", "port": 5432}
+
+    assert conf.get_item("database.host") == Confitem("database.host", "localhost", USR)
+    assert conf.get_item("database.port") == Confitem("database.port", 5432, USR)
+
+
+def test_indexed_access_supports_dotted_and_section_reads():
+    conf = Confease(**{"database": {"host": "localhost", "port": 5432}})
+
+    assert conf["database.host"] == "localhost"
+    assert conf["database"] == {"host": "localhost", "port": 5432}
+    assert conf["database"]["host"] == "localhost"
+
+
+def test_indexed_section_reads_return_plain_dicts_with_key_errors():
+    conf = Confease(**{"database": {"host": "localhost"}})
+
+    with pytest.raises(KeyError):
+        conf["database"]["missing"]
+
+
 def test_yaml_load_flattens_nested_mapping_into_leaf_items(tmp_path):
     path = tmp_path / "conf.yaml"
     path.write_text("database:\n  host: localhost\n  port: 5432\n")

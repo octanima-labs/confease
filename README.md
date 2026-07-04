@@ -25,6 +25,10 @@ CONF.get('new_key', cast=dict) # 1312 (print error and returns original value)
 CONF.set('database', {'host': 'localhost', 'port': 5432})
 CONF.get('database.host') # 'localhost'
 CONF.get('database') # {'host': 'localhost', 'port': 5432}
+CONF['new_key'] # 1312
+CONF['database']['host'] # 'localhost'
+CONF['database.host'] # 'localhost'
+CONF['other_key'] = True
 
 CONF.load_sources(args, '/path/to/file1', '/path/to/file2', '/path/to/file3')
 # Update the configuration object from multiple sources, with import rules

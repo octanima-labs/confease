@@ -299,6 +299,12 @@ class Confease:
             self._set_item(item_key, item_value, USR, force=True)
         if self._reload:
             self.save()
+
+    def __getitem__(self, key: str):
+        return self.get(key)
+
+    def __setitem__(self, key: str, value: Any):
+        self.set(key, value)
     
     def __str__(self):
         # print the configuration in the console
