@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 from typing import Any
 import tomllib
+import xml.etree.ElementTree as ET
 
 import tomli_w
 import yaml
@@ -146,6 +147,71 @@ class Cfg(Ini):
 
 class Xml(Parser):
     extensions = (XML,)
+
+    @staticmethod
+    def save(path: str | Path, data: Mapping[str, Any], **kwargs):
+        root = ET.Element("config")
+        for raw_key, value in data.items():
+            key = str(raw_key)
+            if isinstance(value, Mapping):
+                section = ET.SubElement(root, "section", {"name": key})
+                for raw_subkey, subvalue in value.items():
+                    if isinstance(subvalue, Mapping):
+                        raise ValueError(f"XML configuration keys support one nested level only: {key}.{raw_subkey}")
+                    Xml._append_entry(section, str(raw_subkey), subvalue)
+            else:
+                Xml._append_entry(root, key, value)
+
+        tree = ET.ElementTree(root)
+        ET.indent(tree, space="  ")
+        tree.write(Path(path).expanduser(), encoding="unicode", xml_declaration=True)
+
+    @staticmethod
+    def load(path: str | Path, **kwargs) -> dict[str, Any]:
+        load_path = Path(path).expanduser()
+        root = ET.parse(load_path).getroot()
+        if root.tag != "config":
+            raise ValueError(f"XML configuration root must be <config>: {load_path}")
+
+        data: dict[str, Any] = {}
+        for element in root:
+            if element.tag == "entry":
+                key, value = Xml._read_entry(element)
+                if key in data:
+                    raise ValueError(f"Duplicate XML configuration key: {key}")
+                data[key] = value
+            elif element.tag == "section":
+                name = element.attrib.get("name")
+                if not name:
+                    raise ValueError("XML section elements must define a name attribute")
+                if name in data:
+                    raise ValueError(f"Duplicate XML configuration key: {name}")
+                section: dict[str, Any] = {}
+                for child in element:
+                    if child.tag != "entry":
+                        raise ValueError(f"XML sections may only contain entry elements: {name}")
+                    key, value = Xml._read_entry(child)
+                    if key in section:
+                        raise ValueError(f"Duplicate XML configuration key: {name}.{key}")
+                    section[key] = value
+                data[name] = section
+            else:
+                raise ValueError(f"Unsupported XML configuration element: {element.tag}")
+        return data
+
+    @staticmethod
+    def _append_entry(parent: ET.Element, key: str, value: Any):
+        entry = ET.SubElement(parent, "entry", {"key": key})
+        entry.text = yaml.safe_dump(value, default_flow_style=True).strip()
+
+    @staticmethod
+    def _read_entry(element: ET.Element) -> tuple[str, Any]:
+        key = element.attrib.get("key")
+        if not key:
+            raise ValueError("XML entry elements must define a key attribute")
+        if len(element):
+            raise ValueError(f"XML entry elements cannot contain child elements: {key}")
+        return key, yaml.safe_load(element.text or "")
 
 class Csv(Parser):
     extensions = (CSV,)

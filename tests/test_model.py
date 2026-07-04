@@ -1,5 +1,6 @@
 import csv as csv_module
 import json
+import xml.etree.ElementTree as ET
 
 import pytest
 import yaml
@@ -242,20 +243,6 @@ def test_nested_keys_support_one_level_only():
         conf.set("a", {"b": {"c": "value"}})
 
 
-def test_unsupported_parser_raises_for_persistence(tmp_path):
-    path = tmp_path / "conf.xml"
-    path.write_text("<config></config>\n")
-
-    with pytest.raises(NotImplementedError, match="not implemented"):
-        Confease(path, parser=Xml)
-
-    missing_path = tmp_path / "new.xml"
-    conf = Confease(missing_path, parser=Xml)
-    conf.set("KEY", "value")
-    with pytest.raises(NotImplementedError, match="not implemented"):
-        conf.save()
-
-
 def test_yaml_parser_loads_and_saves_plain_mapping(tmp_path):
     path = tmp_path / "conf.yaml"
 
@@ -337,6 +324,66 @@ def test_ini_parser_preserves_key_case(tmp_path):
     assert Ini.load(path) == {"APP_DIR": "~/Apps", "database": {"HOST": "localhost"}}
 
 
+def test_xml_parser_loads_and_saves_entry_section_mapping(tmp_path):
+    path = tmp_path / "conf.xml"
+
+    Xml.save(path, {"APP_DIR": "~/Apps", "debug": True, "database": {"host": "localhost", "port": 5432}})
+
+    assert Xml.load(path) == {
+        "APP_DIR": "~/Apps",
+        "debug": True,
+        "database": {"host": "localhost", "port": 5432},
+    }
+    assert ET.parse(path).getroot().tag == "config"
+
+
+def test_xml_parser_loads_yaml_typed_values(tmp_path):
+    path = tmp_path / "conf.xml"
+    path.write_text(
+        """<?xml version='1.0'?>
+<config>
+  <entry key="enabled">true</entry>
+  <entry key="missing">null</entry>
+  <entry key="numbers">[1, 2, 3]</entry>
+  <section name="database">
+    <entry key="port">5432</entry>
+  </section>
+</config>
+"""
+    )
+
+    assert Xml.load(path) == {
+        "enabled": True,
+        "missing": None,
+        "numbers": [1, 2, 3],
+        "database": {"port": 5432},
+    }
+
+
+def test_xml_parser_rejects_invalid_shapes(tmp_path):
+    path = tmp_path / "invalid.xml"
+
+    path.write_text("<settings></settings>")
+    with pytest.raises(ValueError, match="root"):
+        Xml.load(path)
+
+    path.write_text("<config><item key='KEY'>value</item></config>")
+    with pytest.raises(ValueError, match="Unsupported"):
+        Xml.load(path)
+
+    path.write_text("<config><entry>value</entry></config>")
+    with pytest.raises(ValueError, match="key attribute"):
+        Xml.load(path)
+
+    path.write_text("<config><section><entry key='KEY'>value</entry></section></config>")
+    with pytest.raises(ValueError, match="name attribute"):
+        Xml.load(path)
+
+    path.write_text("<config><section name='section'><section name='nested'></section></section></config>")
+    with pytest.raises(ValueError, match="only contain entry"):
+        Xml.load(path)
+
+
 def test_ini_file_loads_when_parser_is_inferred(tmp_path):
     path = tmp_path / "conf.ini"
     path.write_text("[DEFAULT]\nAPP_DIR = ~/Apps\n\n[database]\nhost = localhost\nport = 5432\n")
@@ -346,6 +393,26 @@ def test_ini_file_loads_when_parser_is_inferred(tmp_path):
     assert conf.get_item("APP_DIR") == Confitem("APP_DIR", "~/Apps", USR)
     assert conf.get_item("database.host") == Confitem("database.host", "localhost", USR)
     assert conf.get_item("database.port") == Confitem("database.port", "5432", USR)
+
+
+def test_xml_file_loads_when_parser_is_inferred(tmp_path):
+    path = tmp_path / "conf.xml"
+    path.write_text(
+        """<config>
+  <entry key="KEY">value</entry>
+  <section name="database">
+    <entry key="host">localhost</entry>
+    <entry key="port">5432</entry>
+  </section>
+</config>
+"""
+    )
+
+    conf = Confease(path, parser=None)
+
+    assert conf.get_item("KEY") == Confitem("KEY", "value", USR)
+    assert conf.get_item("database.host") == Confitem("database.host", "localhost", USR)
+    assert conf.get_item("database.port") == Confitem("database.port", 5432, USR)
 
 
 def test_cfg_conf_and_config_files_infer_ini_parser(tmp_path):
@@ -368,6 +435,18 @@ def test_confease_saves_nested_values_as_ini(tmp_path):
     conf.save()
 
     assert Ini.load(path) == {"APP_DIR": "~/Apps", "database": {"host": "localhost", "port": "5432"}}
+
+
+def test_confease_saves_nested_values_as_xml(tmp_path):
+    path = tmp_path / "conf.xml"
+    conf = Confease(path, parser=Xml)
+
+    conf.set("APP_DIR", "~/Apps")
+    conf.set("database.host", "localhost")
+    conf.set("database.port", 5432)
+    conf.save()
+
+    assert Xml.load(path) == {"APP_DIR": "~/Apps", "database": {"host": "localhost", "port": 5432}}
 
 
 def test_csv_file_loads_when_parser_is_inferred(tmp_path):
@@ -453,6 +532,7 @@ def test_parser_registry_maps_yaml_extensions_to_yaml_class():
     assert PARSER_CLASSES[".cfg"] is Ini
     assert PARSER_CLASSES[".conf"] is Ini
     assert PARSER_CLASSES[".config"] is Ini
+    assert PARSER_CLASSES[".xml"] is Xml
 
 
 def test_base_parser_methods_raise_not_implemented(tmp_path):
