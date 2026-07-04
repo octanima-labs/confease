@@ -37,6 +37,7 @@ PARSERS = [
 
 
 def _dump_value(value: Any) -> str:
+    """Serialize a scalar value as compact YAML text for flat formats."""
     dumped = yaml.safe_dump(value, default_flow_style=True).strip()
     if dumped.endswith("\n..."):
         dumped = dumped[:-4]
@@ -44,29 +45,38 @@ def _dump_value(value: Any) -> str:
 
 
 def _load_value(value: str) -> Any:
+    """Parse YAML scalar text back into a Python value."""
     return yaml.safe_load(value)
 
 class Parser:
+    """Base parser interface for file-format implementations."""
+
     extensions: tuple[str, ...] = ()
     
     @staticmethod
     def save(path: str | Path, data: Mapping[str, Any], **kwargs):
+        """Save mapping data to a path."""
         raise NotImplementedError("This parser is not implemented for saving yet")
     
     @staticmethod
     def load(path: str | Path, **kwargs) -> dict[str, Any]:
+        """Load mapping data from a path."""
         raise NotImplementedError("This parser is not implemented for loading yet")
     
 class Yaml(Parser):
+    """YAML parser using PyYAML."""
+
     extensions = (YAML, YML)
 
     @staticmethod
     def save(path: str | Path, data: Mapping[str, Any], **kwargs):
+        """Write mapping data as YAML."""
         with Path(path).expanduser().open("w") as file:
             yaml.safe_dump(dict(data), file, sort_keys=True)
 
     @staticmethod
     def load(path: str | Path, **kwargs) -> dict[str, Any]:
+        """Read YAML data and require a top-level mapping."""
         load_path = Path(path).expanduser()
         with load_path.open() as file:
             data = yaml.safe_load(file)
@@ -78,16 +88,20 @@ class Yaml(Parser):
         return {str(key): value for key, value in data.items()}
 
 class Json(Parser):
+    """JSON parser using the Python standard library."""
+
     extensions = (JSON,)
 
     @staticmethod
     def save(path: str | Path, data: Mapping[str, Any], **kwargs):
+        """Write mapping data as formatted JSON."""
         with Path(path).expanduser().open("w") as file:
             json.dump(dict(data), file, indent=2, sort_keys=True)
             file.write("\n")
 
     @staticmethod
     def load(path: str | Path, **kwargs) -> dict[str, Any]:
+        """Read JSON data and require a top-level mapping."""
         load_path = Path(path).expanduser()
         with load_path.open() as file:
             data = json.load(file)
@@ -97,28 +111,36 @@ class Json(Parser):
         return {str(key): value for key, value in data.items()}
 
 class Toml(Parser):
+    """TOML parser using tomllib and tomli-w."""
+
     extensions = (TOML,)
 
     @staticmethod
     def save(path: str | Path, data: Mapping[str, Any], **kwargs):
+        """Write mapping data as TOML."""
         Path(path).expanduser().write_text(tomli_w.dumps(dict(data)))
 
     @staticmethod
     def load(path: str | Path, **kwargs) -> dict[str, Any]:
+        """Read TOML mapping data."""
         with Path(path).expanduser().open("rb") as file:
             return tomllib.load(file)
 
 class Ini(Parser):
+    """INI-family parser using ConfigParser sections for one-level nesting."""
+
     extensions: tuple[str, ...] = (INI, CFG, CONF, CONFIG)
 
     @staticmethod
     def _new_config() -> configparser.ConfigParser:
+        """Create a case-preserving ConfigParser without interpolation."""
         config = configparser.ConfigParser(interpolation=None)
         setattr(config, "optionxform", str)
         return config
 
     @staticmethod
     def save(path: str | Path, data: Mapping[str, Any], **kwargs):
+        """Write mapping data as INI, storing values as YAML scalar text."""
         config = Ini._new_config()
         for raw_key, value in data.items():
             key = str(raw_key)
@@ -136,6 +158,7 @@ class Ini(Parser):
 
     @staticmethod
     def load(path: str | Path, **kwargs) -> dict[str, Any]:
+        """Read INI data and parse values from YAML scalar text."""
         config = Ini._new_config()
         load_path = Path(path).expanduser()
         with load_path.open() as file:
@@ -154,13 +177,18 @@ class Ini(Parser):
 
 
 class Cfg(Ini):
+    """Deprecated compatibility alias for INI-style parsing."""
+
     extensions: tuple[str, ...] = ()
 
 class Xml(Parser):
+    """XML parser using <entry> leaves and <section> one-level nesting."""
+
     extensions = (XML,)
 
     @staticmethod
     def save(path: str | Path, data: Mapping[str, Any], **kwargs):
+        """Write mapping data as XML with YAML-typed entry text."""
         root = ET.Element("config")
         for raw_key, value in data.items():
             key = str(raw_key)
@@ -179,6 +207,7 @@ class Xml(Parser):
 
     @staticmethod
     def load(path: str | Path, **kwargs) -> dict[str, Any]:
+        """Read XML data and validate the supported config shape."""
         load_path = Path(path).expanduser()
         root = ET.parse(load_path).getroot()
         if root.tag != "config":
@@ -212,11 +241,13 @@ class Xml(Parser):
 
     @staticmethod
     def _append_entry(parent: ET.Element, key: str, value: Any):
+        """Append an XML entry element under a parent element."""
         entry = ET.SubElement(parent, "entry", {"key": key})
         entry.text = _dump_value(value)
 
     @staticmethod
     def _read_entry(element: ET.Element) -> tuple[str, Any]:
+        """Read an XML entry element into a key and typed Python value."""
         key = element.attrib.get("key")
         if not key:
             raise ValueError("XML entry elements must define a key attribute")
@@ -225,10 +256,13 @@ class Xml(Parser):
         return key, yaml.safe_load(element.text or "")
 
 class Csv(Parser):
+    """CSV parser with a `key,value` header and flat dotted keys."""
+
     extensions = (CSV,)
 
     @staticmethod
     def save(path: str | Path, data: Mapping[str, Any], **kwargs):
+        """Write mapping data as CSV, flattening nested sections."""
         save_path = Path(path).expanduser()
         with save_path.open("w", newline="") as file:
             writer = csv.DictWriter(file, fieldnames=["key", "value"])
@@ -238,6 +272,7 @@ class Csv(Parser):
 
     @staticmethod
     def load(path: str | Path, **kwargs) -> dict[str, Any]:
+        """Read CSV data and parse each value from YAML scalar text."""
         load_path = Path(path).expanduser()
         with load_path.open(newline="") as file:
             reader = csv.DictReader(file)
@@ -252,6 +287,7 @@ class Csv(Parser):
 
     @staticmethod
     def _flatten(data: Mapping[str, Any]) -> dict[str, Any]:
+        """Flatten nested mapping sections into dotted keys for CSV output."""
         flat: dict[str, Any] = {}
         for raw_key, value in data.items():
             key = str(raw_key)

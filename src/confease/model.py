@@ -37,7 +37,10 @@ ORIGINS = [
 ]
 
 class Confitem:
+    """Single flattened configuration value with its source origin."""
+
     def __init__(self, key: str, value: Any, origin: str):
+        """Create a config item, validating that the origin is supported."""
         self._key = str(key)
         self._value = value
         if origin in ORIGINS:
@@ -47,17 +50,21 @@ class Confitem:
     
     @property
     def key(self):
+        """Return the flattened config key."""
         return self._key
     
     @property
     def value(self):
+        """Return the stored value without coercion."""
         return self._value
 
     @property
     def origin(self):
+        """Return the source origin that provided this value."""
         return self._origin
     
     def __eq__(self, other):
+        """Compare by key for strings or by all fields for other items."""
         if isinstance(other, str):
             return other == self._key
         elif isinstance(other, Confitem):
@@ -66,15 +73,20 @@ class Confitem:
             return False
     
     def __repr__(self):
+        """Return a developer-friendly representation."""
         return f"Confitem<{self._key}, {self._value}, {self._origin}>"
     
     def __str__(self):
+        """Return the string form of the stored value."""
         return str(self._value)
     
 
 
 class Confease:
+    """Configuration container with defaults, persistence, and source precedence."""
+
     def __init__(self, path: str | Path | None = None, reload: bool = False, parser: type[Parser] | None = Yaml, template: str | Path | None = None, preference = [CLI, ENV, SYS, USR, DEF], **kwargs):
+        """Initialize a configuration object from optional defaults and file path."""
         if path is None:
             self._path: Path | None = None
             print("[-] Runtime-only configuration. No path provided, so conf file will not persist")
@@ -110,10 +122,12 @@ class Confease:
 
     @property
     def preference(self):
+        """Return source origins ordered from highest to lowest priority."""
         return self._preference
 
     @preference.setter
     def preference(self, value):
+        """Set source precedence, appending any omitted origins after the provided ones."""
         if value is None:
             self._preference = list(ORIGINS)
         else:
@@ -127,6 +141,7 @@ class Confease:
             self._preference = preference + [origin for origin in ORIGINS if origin not in preference]
 
     def _origin_priority(self, origin: str) -> int:
+        """Return the numeric precedence index for an origin."""
         if self._preference is None:
             self.preference = None
         if self._preference is None:
@@ -135,12 +150,14 @@ class Confease:
 
     @staticmethod
     def _validate_key(key: str):
+        """Validate that a key is scalar or one-level dotted notation."""
         parts = key.split(".")
         if len(parts) > 2 or any(part == "" for part in parts):
             raise ValueError(f"Nested configuration keys support one level only: {key}")
 
     @classmethod
     def _ensure_no_key_collisions(cls, keys):
+        """Reject mixed scalar and section keys such as `database` and `database.host`."""
         scalar_keys: set[str] = set()
         section_keys: set[str] = set()
         for key in keys:
@@ -156,9 +173,11 @@ class Confease:
 
     @classmethod
     def _flatten_mapping(cls, data: Mapping[str, Any]) -> dict[str, Any]:
+        """Flatten a mapping with one-level nested sections into dotted keys."""
         flat: dict[str, Any] = {}
 
         def add_item(key: str, value: Any):
+            """Add a flattened item while detecting invalid or duplicate keys."""
             cls._validate_key(key)
             if key in flat:
                 raise ValueError(f"Duplicate configuration key: {key}")
@@ -181,6 +200,7 @@ class Confease:
 
     @classmethod
     def _nest_mapping(cls, data: Mapping[str, Any]) -> dict[str, Any]:
+        """Convert flat dotted keys back into one-level nested sections."""
         cls._ensure_no_key_collisions(data.keys())
         nested: dict[str, Any] = {}
         for key, value in data.items():
@@ -196,6 +216,7 @@ class Confease:
         return nested
 
     def _ensure_key_does_not_collide(self, key: str):
+        """Reject setting a key that conflicts with existing scalar or section entries."""
         self._validate_key(key)
         if self._entries is None:
             return
@@ -210,12 +231,14 @@ class Confease:
                 raise ValueError(f"Configuration key collides with nested section: {parent}")
 
     def _set_item(self, key: str, value: Any, origin: str, *, force: bool = False):
-        self._ensure_key_does_not_collide(key)
-        incoming = Confitem(key, value, origin)
+        """Set an item if allowed by precedence, or always when forced."""
         if self._entries is None:
             self.reset()
         if self._entries is None:
             self._entries = []
+
+        self._ensure_key_does_not_collide(key)
+        incoming = Confitem(key, value, origin)
 
         for index, entry in enumerate(self._entries):
             if entry == key:
@@ -225,6 +248,7 @@ class Confease:
         self._entries.append(incoming)
     
     def load(self, path: str | Path | None = None):
+        """Load configuration values from a file as user-origin entries."""
         # param path allows to override the load file
         load_path = Path(path).expanduser() if path is not None else self._path
         if load_path is None:
@@ -239,6 +263,7 @@ class Confease:
         return
     
     def save(self, user_only: bool = True):
+        """Persist configuration to the instance path, optionally including all origins."""
         if self._path is None:
             return
 
@@ -252,6 +277,7 @@ class Confease:
         self._parser.save(self._path, data)
 
     def reset(self):
+        """Reset entries to defaults or reload from the configured template."""
         print("Setting default configuration...")
         if self._template:
             # TODO: copy self._template to self._path 
@@ -262,6 +288,7 @@ class Confease:
             return
 
     def get(self, key: str, default = None, cast = None):
+        """Return a value or section by key, optionally casting the result."""
         item = self.get_item(key)
         val = item.value if item is not None else self._get_section(key)
         if val is None:
@@ -274,6 +301,7 @@ class Confease:
         return val
     
     def get_item(self, key: str) -> Confitem | None:
+        """Return the matching config item, or None if no leaf item exists."""
         if self._entries is None:
             self.reset()
         elif self._reload:
@@ -286,6 +314,7 @@ class Confease:
         return None
 
     def _get_section(self, key: str) -> dict[str, Any] | None:
+        """Return a plain dict for a one-level section, or None when absent."""
         if self._entries is None:
             return None
         self._validate_key(key)
@@ -294,6 +323,7 @@ class Confease:
         return section or None
 
     def set(self, key: str, value: Any):
+        """Store a user-origin value, supporting dotted keys and nested dict values."""
         items = self._flatten_mapping({key: value})
         for item_key, item_value in items.items():
             self._set_item(item_key, item_value, USR, force=True)
@@ -301,21 +331,26 @@ class Confease:
             self.save()
 
     def __getitem__(self, key: str):
+        """Return `get(key)` so missing keys produce None."""
         return self.get(key)
 
     def __setitem__(self, key: str, value: Any):
+        """Assign through `set(key, value)`."""
         self.set(key, value)
     
     def __str__(self):
+        """Return a printable configuration representation once implemented."""
         # print the configuration in the console
         pass
     
     def text_edit(self):
+        """Open an interactive config editor once implemented."""
         # open terminal text-editor to edit the configuration in real-time
         pass
 
     
     def load_sources(self, cli: Namespace | None = None, *files, preference: list[str] | None = None):
+        """Reload file, environment, and CLI sources using configured precedence."""
         if preference is not None:
             self.preference = preference
         self.reload_files(*files)
@@ -324,6 +359,7 @@ class Confease:
             self.reload_cli(cli)
 
     def reload_files(self, *paths):
+        """Load additional config files as system or user origins."""
         for path in paths:
             load_path = Path(path).expanduser()
             if not load_path.exists():
@@ -338,11 +374,13 @@ class Confease:
                 self._set_item(key, value, origin)
     
     def reload_cli(self, namespace: Namespace):
+        """Load non-None argparse namespace values as CLI-origin entries."""
         data = {key: value for key, value in vars(namespace).items() if value is not None}
         for key, value in self._flatten_mapping(data).items():
             self._set_item(key, value, CLI)
 
     def reload_env(self):
+        """Load known environment variables as ENV-origin entries with YAML parsing."""
         if self._entries is None:
             self.reset()
         entries = self._entries or []

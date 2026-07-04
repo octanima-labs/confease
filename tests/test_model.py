@@ -71,6 +71,21 @@ def test_get_item_returns_confitem():
     assert item == Confitem("KEY", "value", DEF)
 
 
+def test_confitem_rejects_unknown_origins():
+    with pytest.raises(ValueError, match="Unknown origin"):
+        Confitem("KEY", "value", "unknown")
+
+
+def test_confitem_string_equality_repr_and_str():
+    item = Confitem("KEY", 1312, USR)
+
+    assert item == "KEY"
+    assert item != "OTHER"
+    assert item != object()
+    assert repr(item) == "Confitem<KEY, 1312, user>"
+    assert str(item) == "1312"
+
+
 def test_set_adds_and_updates_user_origin_values():
     conf = Confease()
 
@@ -191,6 +206,51 @@ def test_load_sources_custom_preference_can_make_env_win(monkeypatch):
     conf.load_sources(Namespace(KEY="cli"), preference=[ENV, CLI, DEF])
 
     assert conf.get_item("KEY") == Confitem("KEY", "env", ENV)
+
+
+def test_load_sources_keeps_existing_preference_when_not_overridden(monkeypatch):
+    monkeypatch.setenv("KEY", "env")
+    conf = Confease(KEY="default", preference=[DEF, CLI, ENV])
+
+    conf.load_sources(Namespace(KEY="cli"))
+
+    assert conf.preference == [DEF, CLI, ENV, SYS, USR]
+    assert conf.get_item("KEY") == Confitem("KEY", "default", DEF)
+
+
+def test_load_sources_applies_default_precedence_across_all_origins(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("KEY", "env")
+    system_path = tmp_path / "system.yaml"
+    user_path = home / "conf.yaml"
+    system_path.write_text("KEY: system\n")
+    user_path.write_text("KEY: user\n")
+    conf = Confease(KEY="default")
+
+    conf.load_sources(Namespace(KEY="cli"), system_path, user_path)
+
+    assert conf.get_item("KEY") == Confitem("KEY", "cli", CLI)
+
+
+def test_reload_files_raises_when_source_keys_collide_with_existing_sections(tmp_path):
+    path = tmp_path / "conf.yaml"
+    path.write_text("database: sqlite\n")
+    conf = Confease(**{"database": {"host": "localhost"}})
+
+    with pytest.raises(ValueError, match="collides"):
+        conf.reload_files(path)
+
+
+def test_indexed_access_uses_reload_enabled_file_reads(tmp_path):
+    path = tmp_path / "conf.yaml"
+    path.write_text("KEY: initial\n")
+    conf = Confease(path, reload=True)
+
+    path.write_text("KEY: updated\n")
+
+    assert conf["KEY"] == "updated"
 
 
 def test_existing_yaml_file_loads_on_init_with_defaults(tmp_path):
@@ -470,6 +530,14 @@ def test_csv_parser_rejects_missing_required_header(tmp_path):
         Csv.load(path)
 
 
+def test_csv_parser_rejects_malformed_rows(tmp_path):
+    path = tmp_path / "invalid.csv"
+    path.write_text("key,value\n,missing-key\n")
+
+    with pytest.raises(ValueError, match="Malformed"):
+        Csv.load(path)
+
+
 def test_csv_parser_loads_yaml_typed_values(tmp_path):
     path = tmp_path / "conf.csv"
     path.write_text("key,value\nenabled,true\nmissing,null\nnumbers,\"[1, 2, 3]\"\n")
@@ -556,6 +624,18 @@ def test_xml_parser_rejects_invalid_shapes(tmp_path):
 
     path.write_text("<config><section name='section'><section name='nested'></section></section></config>")
     with pytest.raises(ValueError, match="only contain entry"):
+        Xml.load(path)
+
+
+def test_xml_parser_rejects_duplicate_entries(tmp_path):
+    path = tmp_path / "invalid.xml"
+
+    path.write_text("<config><entry key='KEY'>one</entry><entry key='KEY'>two</entry></config>")
+    with pytest.raises(ValueError, match="Duplicate"):
+        Xml.load(path)
+
+    path.write_text("<config><section name='section'><entry key='KEY'>one</entry><entry key='KEY'>two</entry></section></config>")
+    with pytest.raises(ValueError, match="Duplicate"):
         Xml.load(path)
 
 
