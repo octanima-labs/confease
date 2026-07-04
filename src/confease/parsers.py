@@ -1,7 +1,9 @@
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
+import tomllib
 
+import tomli_w
 import yaml
 
 
@@ -64,6 +66,15 @@ class Cfg(Parser):
 
 class Toml(Parser):
     extensions = (TOML,)
+
+    @staticmethod
+    def save(path: str | Path, data: Mapping[str, Any], **kwargs):
+        Path(path).expanduser().write_text(tomli_w.dumps(dict(data)))
+
+    @staticmethod
+    def load(path: str | Path, **kwargs) -> dict[str, Any]:
+        with Path(path).expanduser().open("rb") as file:
+            return tomllib.load(file)
 
 class Ini(Parser):
     extensions = (INI,)

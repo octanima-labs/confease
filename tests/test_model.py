@@ -13,6 +13,7 @@ from confease import (
     Confitem,
     Json,
     Parser,
+    Toml,
     Yaml,
 )
 
@@ -266,9 +267,47 @@ def test_yaml_parser_rejects_non_mapping_files(tmp_path):
         Yaml.load(path)
 
 
+def test_toml_parser_loads_and_saves_nested_mapping(tmp_path):
+    path = tmp_path / "conf.toml"
+
+    Toml.save(path, {"KEY": "value", "database": {"host": "localhost", "port": 5432}})
+
+    assert Toml.load(path) == {"KEY": "value", "database": {"host": "localhost", "port": 5432}}
+
+
+def test_empty_toml_file_loads_empty_mapping(tmp_path):
+    path = tmp_path / "empty.toml"
+    path.write_text("")
+
+    assert Toml.load(path) == {}
+
+
+def test_toml_file_loads_when_parser_is_inferred(tmp_path):
+    path = tmp_path / "conf.toml"
+    path.write_text('KEY = "value"\n\n[database]\nhost = "localhost"\nport = 5432\n')
+
+    conf = Confease(path, parser=None)
+
+    assert conf.get_item("KEY") == Confitem("KEY", "value", USR)
+    assert conf.get_item("database.host") == Confitem("database.host", "localhost", USR)
+    assert conf.get_item("database.port") == Confitem("database.port", 5432, USR)
+
+
+def test_confease_saves_nested_values_as_toml(tmp_path):
+    path = tmp_path / "conf.toml"
+    conf = Confease(path, parser=Toml)
+
+    conf.set("database.host", "localhost")
+    conf.set("database.port", 5432)
+    conf.save()
+
+    assert Toml.load(path) == {"database": {"host": "localhost", "port": 5432}}
+
+
 def test_parser_registry_maps_yaml_extensions_to_yaml_class():
     assert PARSER_CLASSES[".yaml"] is Yaml
     assert PARSER_CLASSES[".yml"] is Yaml
+    assert PARSER_CLASSES[".toml"] is Toml
 
 
 def test_base_parser_methods_raise_not_implemented(tmp_path):
