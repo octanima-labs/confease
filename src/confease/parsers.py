@@ -1,4 +1,5 @@
 from collections.abc import Mapping
+import configparser
 import csv
 import json
 from pathlib import Path
@@ -13,6 +14,8 @@ YAML = '.yaml'
 YML = '.yml'
 JSON = '.json'
 CFG = '.cfg' # ConfigParser
+CONF = '.conf'
+CONFIG = '.config'
 TOML = '.toml' # tomllib
 INI = '.ini'
 XML = '.xml'
@@ -23,6 +26,8 @@ PARSERS = [
     YML,
     JSON,
     CFG,
+    CONF,
+    CONFIG,
     TOML,
     INI,
     XML,
@@ -79,9 +84,6 @@ class Json(Parser):
             raise ValueError(f"Configuration file must contain a key-value mapping: {load_path}")
         return {str(key): value for key, value in data.items()}
 
-class Cfg(Parser):
-    extensions = (CFG,)
-
 class Toml(Parser):
     extensions = (TOML,)
 
@@ -95,7 +97,52 @@ class Toml(Parser):
             return tomllib.load(file)
 
 class Ini(Parser):
-    extensions = (INI,)
+    extensions: tuple[str, ...] = (INI, CFG, CONF, CONFIG)
+
+    @staticmethod
+    def _new_config() -> configparser.ConfigParser:
+        config = configparser.ConfigParser(interpolation=None)
+        setattr(config, "optionxform", str)
+        return config
+
+    @staticmethod
+    def save(path: str | Path, data: Mapping[str, Any], **kwargs):
+        config = Ini._new_config()
+        for raw_key, value in data.items():
+            key = str(raw_key)
+            if isinstance(value, Mapping):
+                config[key] = {}
+                for raw_subkey, subvalue in value.items():
+                    if isinstance(subvalue, Mapping):
+                        raise ValueError(f"INI configuration keys support one nested level only: {key}.{raw_subkey}")
+                    config[key][str(raw_subkey)] = str(subvalue)
+            else:
+                config["DEFAULT"][key] = str(value)
+
+        with Path(path).expanduser().open("w") as file:
+            config.write(file)
+
+    @staticmethod
+    def load(path: str | Path, **kwargs) -> dict[str, Any]:
+        config = Ini._new_config()
+        load_path = Path(path).expanduser()
+        with load_path.open() as file:
+            config.read_file(file)
+
+        data: dict[str, Any] = dict(config.defaults())
+        sections: dict[str, dict[str, str]] = getattr(config, "_sections")
+        for section in config.sections():
+            section_items = {
+                key: value
+                for key, value in sections[section].items()
+                if key != "__name__"
+            }
+            data[section] = section_items
+        return data
+
+
+class Cfg(Ini):
+    extensions: tuple[str, ...] = ()
 
 class Xml(Parser):
     extensions = (XML,)
@@ -143,6 +190,6 @@ class Csv(Parser):
 
 PARSER_CLASSES: dict[str, type[Parser]] = {
     extension: parser
-    for parser in (Yaml, Json, Cfg, Toml, Ini, Xml, Csv)
+    for parser in (Yaml, Json, Toml, Ini, Xml, Csv)
     for extension in parser.extensions
 }

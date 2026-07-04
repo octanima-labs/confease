@@ -19,6 +19,7 @@ from confease import (
     Json,
     Parser,
     Toml,
+    Xml,
     Yaml,
 )
 
@@ -242,14 +243,14 @@ def test_nested_keys_support_one_level_only():
 
 
 def test_unsupported_parser_raises_for_persistence(tmp_path):
-    path = tmp_path / "conf.ini"
-    path.write_text("[section]\nkey=value\n")
+    path = tmp_path / "conf.xml"
+    path.write_text("<config></config>\n")
 
     with pytest.raises(NotImplementedError, match="not implemented"):
-        Confease(path, parser=Ini)
+        Confease(path, parser=Xml)
 
-    missing_path = tmp_path / "new.ini"
-    conf = Confease(missing_path, parser=Ini)
+    missing_path = tmp_path / "new.xml"
+    conf = Confease(missing_path, parser=Xml)
     conf.set("KEY", "value")
     with pytest.raises(NotImplementedError, match="not implemented"):
         conf.save()
@@ -319,6 +320,54 @@ def test_csv_parser_rejects_missing_required_header(tmp_path):
 
     with pytest.raises(ValueError, match="key,value"):
         Csv.load(path)
+
+
+def test_ini_parser_loads_and_saves_sectioned_mapping(tmp_path):
+    path = tmp_path / "conf.ini"
+
+    Ini.save(path, {"APP_DIR": "~/Apps", "database": {"HOST": "localhost", "port": 5432}})
+
+    assert Ini.load(path) == {"APP_DIR": "~/Apps", "database": {"HOST": "localhost", "port": "5432"}}
+
+
+def test_ini_parser_preserves_key_case(tmp_path):
+    path = tmp_path / "conf.ini"
+    path.write_text("[DEFAULT]\nAPP_DIR = ~/Apps\n\n[database]\nHOST = localhost\n")
+
+    assert Ini.load(path) == {"APP_DIR": "~/Apps", "database": {"HOST": "localhost"}}
+
+
+def test_ini_file_loads_when_parser_is_inferred(tmp_path):
+    path = tmp_path / "conf.ini"
+    path.write_text("[DEFAULT]\nAPP_DIR = ~/Apps\n\n[database]\nhost = localhost\nport = 5432\n")
+
+    conf = Confease(path, parser=None)
+
+    assert conf.get_item("APP_DIR") == Confitem("APP_DIR", "~/Apps", USR)
+    assert conf.get_item("database.host") == Confitem("database.host", "localhost", USR)
+    assert conf.get_item("database.port") == Confitem("database.port", "5432", USR)
+
+
+def test_cfg_conf_and_config_files_infer_ini_parser(tmp_path):
+    for suffix in [".cfg", ".conf", ".config"]:
+        path = tmp_path / f"conf{suffix}"
+        path.write_text("[section]\nkey = value\n")
+
+        conf = Confease(path, parser=None)
+
+        assert conf.get_item("section.key") == Confitem("section.key", "value", USR)
+
+
+def test_confease_saves_nested_values_as_ini(tmp_path):
+    path = tmp_path / "conf.ini"
+    conf = Confease(path, parser=Ini)
+
+    conf.set("APP_DIR", "~/Apps")
+    conf.set("database.host", "localhost")
+    conf.set("database.port", 5432)
+    conf.save()
+
+    assert Ini.load(path) == {"APP_DIR": "~/Apps", "database": {"host": "localhost", "port": "5432"}}
 
 
 def test_csv_file_loads_when_parser_is_inferred(tmp_path):
@@ -400,6 +449,10 @@ def test_parser_registry_maps_yaml_extensions_to_yaml_class():
     assert PARSER_CLASSES[".json"] is Json
     assert PARSER_CLASSES[".toml"] is Toml
     assert PARSER_CLASSES[".csv"] is Csv
+    assert PARSER_CLASSES[".ini"] is Ini
+    assert PARSER_CLASSES[".cfg"] is Ini
+    assert PARSER_CLASSES[".conf"] is Ini
+    assert PARSER_CLASSES[".config"] is Ini
 
 
 def test_base_parser_methods_raise_not_implemented(tmp_path):

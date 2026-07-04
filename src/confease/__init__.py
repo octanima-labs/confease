@@ -10,6 +10,8 @@ from confease.model import (
 )
 from confease.parsers import (
     CFG,
+    CONF,
+    CONFIG,
     CSV,
     INI,
     JSON,
@@ -32,6 +34,8 @@ from confease.parsers import (
 __all__ = [
     "CFG",
     "CLI",
+    "CONF",
+    "CONFIG",
     "CSV",
     "DEF",
     "ENV",
