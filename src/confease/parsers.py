@@ -1,4 +1,5 @@
 from collections.abc import Mapping
+import json
 from pathlib import Path
 from typing import Any
 import tomllib
@@ -60,6 +61,22 @@ class Yaml(Parser):
 
 class Json(Parser):
     extensions = (JSON,)
+
+    @staticmethod
+    def save(path: str | Path, data: Mapping[str, Any], **kwargs):
+        with Path(path).expanduser().open("w") as file:
+            json.dump(dict(data), file, indent=2, sort_keys=True)
+            file.write("\n")
+
+    @staticmethod
+    def load(path: str | Path, **kwargs) -> dict[str, Any]:
+        load_path = Path(path).expanduser()
+        with load_path.open() as file:
+            data = json.load(file)
+
+        if not isinstance(data, dict):
+            raise ValueError(f"Configuration file must contain a key-value mapping: {load_path}")
+        return {str(key): value for key, value in data.items()}
 
 class Cfg(Parser):
     extensions = (CFG,)

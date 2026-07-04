@@ -1,4 +1,5 @@
 import pytest
+import json
 import yaml
 
 from confease import (
@@ -11,6 +12,7 @@ from confease import (
     USR,
     Confease,
     Confitem,
+    Csv,
     Json,
     Parser,
     Toml,
@@ -237,14 +239,14 @@ def test_nested_keys_support_one_level_only():
 
 
 def test_unsupported_parser_raises_for_persistence(tmp_path):
-    path = tmp_path / "conf.json"
-    path.write_text('{"KEY": "value"}')
+    path = tmp_path / "conf.csv"
+    path.write_text("KEY,value\n")
 
     with pytest.raises(NotImplementedError, match="not implemented"):
-        Confease(path, parser=Json)
+        Confease(path, parser=Csv)
 
-    missing_path = tmp_path / "new.json"
-    conf = Confease(missing_path, parser=Json)
+    missing_path = tmp_path / "new.csv"
+    conf = Confease(missing_path, parser=Csv)
     conf.set("KEY", "value")
     with pytest.raises(NotImplementedError, match="not implemented"):
         conf.save()
@@ -273,6 +275,46 @@ def test_toml_parser_loads_and_saves_nested_mapping(tmp_path):
     Toml.save(path, {"KEY": "value", "database": {"host": "localhost", "port": 5432}})
 
     assert Toml.load(path) == {"KEY": "value", "database": {"host": "localhost", "port": 5432}}
+
+
+def test_json_parser_loads_and_saves_nested_mapping(tmp_path):
+    path = tmp_path / "conf.json"
+
+    Json.save(path, {"KEY": "value", "database": {"host": "localhost", "port": 5432}})
+
+    assert Json.load(path) == {"KEY": "value", "database": {"host": "localhost", "port": 5432}}
+    assert json.loads(path.read_text()) == {"KEY": "value", "database": {"host": "localhost", "port": 5432}}
+    assert path.read_text().startswith("{\n")
+
+
+def test_json_parser_rejects_non_mapping_files(tmp_path):
+    path = tmp_path / "invalid.json"
+    path.write_text('["item"]')
+
+    with pytest.raises(ValueError, match="key-value mapping"):
+        Json.load(path)
+
+
+def test_json_file_loads_when_parser_is_inferred(tmp_path):
+    path = tmp_path / "conf.json"
+    path.write_text('{"KEY": "value", "database": {"host": "localhost", "port": 5432}}')
+
+    conf = Confease(path, parser=None)
+
+    assert conf.get_item("KEY") == Confitem("KEY", "value", USR)
+    assert conf.get_item("database.host") == Confitem("database.host", "localhost", USR)
+    assert conf.get_item("database.port") == Confitem("database.port", 5432, USR)
+
+
+def test_confease_saves_nested_values_as_json(tmp_path):
+    path = tmp_path / "conf.json"
+    conf = Confease(path, parser=Json)
+
+    conf.set("database.host", "localhost")
+    conf.set("database.port", 5432)
+    conf.save()
+
+    assert Json.load(path) == {"database": {"host": "localhost", "port": 5432}}
 
 
 def test_empty_toml_file_loads_empty_mapping(tmp_path):
@@ -307,6 +349,7 @@ def test_confease_saves_nested_values_as_toml(tmp_path):
 def test_parser_registry_maps_yaml_extensions_to_yaml_class():
     assert PARSER_CLASSES[".yaml"] is Yaml
     assert PARSER_CLASSES[".yml"] is Yaml
+    assert PARSER_CLASSES[".json"] is Json
     assert PARSER_CLASSES[".toml"] is Toml
 
 
