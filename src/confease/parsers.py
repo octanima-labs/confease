@@ -35,6 +35,17 @@ PARSERS = [
     CSV
 ]
 
+
+def _dump_value(value: Any) -> str:
+    dumped = yaml.safe_dump(value, default_flow_style=True).strip()
+    if dumped.endswith("\n..."):
+        dumped = dumped[:-4]
+    return dumped
+
+
+def _load_value(value: str) -> Any:
+    return yaml.safe_load(value)
+
 class Parser:
     extensions: tuple[str, ...] = ()
     
@@ -116,9 +127,9 @@ class Ini(Parser):
                 for raw_subkey, subvalue in value.items():
                     if isinstance(subvalue, Mapping):
                         raise ValueError(f"INI configuration keys support one nested level only: {key}.{raw_subkey}")
-                    config[key][str(raw_subkey)] = str(subvalue)
+                    config[key][str(raw_subkey)] = _dump_value(subvalue)
             else:
-                config["DEFAULT"][key] = str(value)
+                config["DEFAULT"][key] = _dump_value(value)
 
         with Path(path).expanduser().open("w") as file:
             config.write(file)
@@ -130,11 +141,11 @@ class Ini(Parser):
         with load_path.open() as file:
             config.read_file(file)
 
-        data: dict[str, Any] = dict(config.defaults())
+        data: dict[str, Any] = {key: _load_value(value) for key, value in config.defaults().items()}
         sections: dict[str, dict[str, str]] = getattr(config, "_sections")
         for section in config.sections():
             section_items = {
-                key: value
+                key: _load_value(value)
                 for key, value in sections[section].items()
                 if key != "__name__"
             }
@@ -202,7 +213,7 @@ class Xml(Parser):
     @staticmethod
     def _append_entry(parent: ET.Element, key: str, value: Any):
         entry = ET.SubElement(parent, "entry", {"key": key})
-        entry.text = yaml.safe_dump(value, default_flow_style=True).strip()
+        entry.text = _dump_value(value)
 
     @staticmethod
     def _read_entry(element: ET.Element) -> tuple[str, Any]:
@@ -223,7 +234,7 @@ class Csv(Parser):
             writer = csv.DictWriter(file, fieldnames=["key", "value"])
             writer.writeheader()
             for key, value in Csv._flatten(data).items():
-                writer.writerow({"key": key, "value": str(value)})
+                writer.writerow({"key": key, "value": _dump_value(value)})
 
     @staticmethod
     def load(path: str | Path, **kwargs) -> dict[str, Any]:
@@ -236,7 +247,7 @@ class Csv(Parser):
             for row in reader:
                 if set(row) != {"key", "value"} or row["key"] in [None, ""] or row["value"] is None:
                     raise ValueError(f"Malformed CSV configuration row: {row}")
-                data[str(row["key"])] = row["value"]
+                data[str(row["key"])] = _load_value(row["value"])
         return data
 
     @staticmethod

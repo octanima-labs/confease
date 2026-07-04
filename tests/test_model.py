@@ -291,7 +291,7 @@ def test_csv_parser_loads_and_saves_flat_dotted_mapping(tmp_path):
 
     Csv.save(path, {"KEY": "value", "database": {"host": "localhost", "port": 5432}})
 
-    assert Csv.load(path) == {"KEY": "value", "database.host": "localhost", "database.port": "5432"}
+    assert Csv.load(path) == {"KEY": "value", "database.host": "localhost", "database.port": 5432}
     with path.open(newline="") as file:
         rows = list(csv_module.DictReader(file))
     assert rows == [
@@ -309,12 +309,26 @@ def test_csv_parser_rejects_missing_required_header(tmp_path):
         Csv.load(path)
 
 
+def test_csv_parser_loads_yaml_typed_values(tmp_path):
+    path = tmp_path / "conf.csv"
+    path.write_text("key,value\nenabled,true\nmissing,null\nnumbers,\"[1, 2, 3]\"\n")
+
+    assert Csv.load(path) == {"enabled": True, "missing": None, "numbers": [1, 2, 3]}
+
+
 def test_ini_parser_loads_and_saves_sectioned_mapping(tmp_path):
     path = tmp_path / "conf.ini"
 
     Ini.save(path, {"APP_DIR": "~/Apps", "database": {"HOST": "localhost", "port": 5432}})
 
-    assert Ini.load(path) == {"APP_DIR": "~/Apps", "database": {"HOST": "localhost", "port": "5432"}}
+    assert Ini.load(path) == {"APP_DIR": "~/Apps", "database": {"HOST": "localhost", "port": 5432}}
+
+
+def test_ini_parser_loads_yaml_typed_values(tmp_path):
+    path = tmp_path / "conf.ini"
+    path.write_text("[DEFAULT]\nenabled = true\nmissing = null\nnumbers = [1, 2, 3]\n")
+
+    assert Ini.load(path) == {"enabled": True, "missing": None, "numbers": [1, 2, 3]}
 
 
 def test_ini_parser_preserves_key_case(tmp_path):
@@ -392,7 +406,7 @@ def test_ini_file_loads_when_parser_is_inferred(tmp_path):
 
     assert conf.get_item("APP_DIR") == Confitem("APP_DIR", "~/Apps", USR)
     assert conf.get_item("database.host") == Confitem("database.host", "localhost", USR)
-    assert conf.get_item("database.port") == Confitem("database.port", "5432", USR)
+    assert conf.get_item("database.port") == Confitem("database.port", 5432, USR)
 
 
 def test_xml_file_loads_when_parser_is_inferred(tmp_path):
@@ -434,7 +448,7 @@ def test_confease_saves_nested_values_as_ini(tmp_path):
     conf.set("database.port", 5432)
     conf.save()
 
-    assert Ini.load(path) == {"APP_DIR": "~/Apps", "database": {"host": "localhost", "port": "5432"}}
+    assert Ini.load(path) == {"APP_DIR": "~/Apps", "database": {"host": "localhost", "port": 5432}}
 
 
 def test_confease_saves_nested_values_as_xml(tmp_path):
@@ -457,7 +471,7 @@ def test_csv_file_loads_when_parser_is_inferred(tmp_path):
 
     assert conf.get_item("KEY") == Confitem("KEY", "value", USR)
     assert conf.get_item("database.host") == Confitem("database.host", "localhost", USR)
-    assert conf.get_item("database.port") == Confitem("database.port", "5432", USR)
+    assert conf.get_item("database.port") == Confitem("database.port", 5432, USR)
 
 
 def test_confease_saves_nested_values_as_csv(tmp_path):
@@ -468,7 +482,7 @@ def test_confease_saves_nested_values_as_csv(tmp_path):
     conf.set("database.port", 5432)
     conf.save()
 
-    assert Csv.load(path) == {"database.host": "localhost", "database.port": "5432"}
+    assert Csv.load(path) == {"database.host": "localhost", "database.port": 5432}
 
 
 def test_json_file_loads_when_parser_is_inferred(tmp_path):
