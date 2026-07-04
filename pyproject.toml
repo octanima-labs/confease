@@ -25,6 +25,7 @@ classifiers = [
 dependencies = [
   "2ning",
   "Jinja2",
+  "PyYAML",
 ]
 
 [project.urls]
@@ -38,6 +39,7 @@ dev = [
   "mypy",
   "pytest",
   "ruff",
+  "types-PyYAML",
 ]
 docs = [
   "myst-parser",
@@ -62,6 +64,7 @@ dependencies = [
   "mypy",
   "pytest",
   "ruff",
+  "types-PyYAML",
 ]
 
 [tool.hatch.envs.docs]
