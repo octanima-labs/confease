@@ -1,4 +1,5 @@
 from collections.abc import Mapping
+import csv
 import json
 from pathlib import Path
 from typing import Any
@@ -101,6 +102,43 @@ class Xml(Parser):
 
 class Csv(Parser):
     extensions = (CSV,)
+
+    @staticmethod
+    def save(path: str | Path, data: Mapping[str, Any], **kwargs):
+        save_path = Path(path).expanduser()
+        with save_path.open("w", newline="") as file:
+            writer = csv.DictWriter(file, fieldnames=["key", "value"])
+            writer.writeheader()
+            for key, value in Csv._flatten(data).items():
+                writer.writerow({"key": key, "value": str(value)})
+
+    @staticmethod
+    def load(path: str | Path, **kwargs) -> dict[str, Any]:
+        load_path = Path(path).expanduser()
+        with load_path.open(newline="") as file:
+            reader = csv.DictReader(file)
+            if reader.fieldnames != ["key", "value"]:
+                raise ValueError(f"CSV configuration file must use header: key,value: {load_path}")
+            data: dict[str, Any] = {}
+            for row in reader:
+                if set(row) != {"key", "value"} or row["key"] in [None, ""] or row["value"] is None:
+                    raise ValueError(f"Malformed CSV configuration row: {row}")
+                data[str(row["key"])] = row["value"]
+        return data
+
+    @staticmethod
+    def _flatten(data: Mapping[str, Any]) -> dict[str, Any]:
+        flat: dict[str, Any] = {}
+        for raw_key, value in data.items():
+            key = str(raw_key)
+            if isinstance(value, Mapping):
+                for raw_subkey, subvalue in value.items():
+                    if isinstance(subvalue, Mapping):
+                        raise ValueError(f"CSV configuration keys support one nested level only: {key}.{raw_subkey}")
+                    flat[f"{key}.{raw_subkey}"] = subvalue
+            else:
+                flat[key] = value
+        return flat
 
 
 PARSER_CLASSES: dict[str, type[Parser]] = {

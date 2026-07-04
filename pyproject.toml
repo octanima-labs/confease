@@ -24,7 +24,6 @@ classifiers = [
 ]
 dependencies = [
   "2ning",
-  "Jinja2",
   "PyYAML",
   "tomli-w",
 ]

@@ -1,5 +1,7 @@
-import pytest
+import csv as csv_module
 import json
+
+import pytest
 import yaml
 
 from confease import (
@@ -13,6 +15,7 @@ from confease import (
     Confease,
     Confitem,
     Csv,
+    Ini,
     Json,
     Parser,
     Toml,
@@ -239,14 +242,14 @@ def test_nested_keys_support_one_level_only():
 
 
 def test_unsupported_parser_raises_for_persistence(tmp_path):
-    path = tmp_path / "conf.csv"
-    path.write_text("KEY,value\n")
+    path = tmp_path / "conf.ini"
+    path.write_text("[section]\nkey=value\n")
 
     with pytest.raises(NotImplementedError, match="not implemented"):
-        Confease(path, parser=Csv)
+        Confease(path, parser=Ini)
 
-    missing_path = tmp_path / "new.csv"
-    conf = Confease(missing_path, parser=Csv)
+    missing_path = tmp_path / "new.ini"
+    conf = Confease(missing_path, parser=Ini)
     conf.set("KEY", "value")
     with pytest.raises(NotImplementedError, match="not implemented"):
         conf.save()
@@ -293,6 +296,51 @@ def test_json_parser_rejects_non_mapping_files(tmp_path):
 
     with pytest.raises(ValueError, match="key-value mapping"):
         Json.load(path)
+
+
+def test_csv_parser_loads_and_saves_flat_dotted_mapping(tmp_path):
+    path = tmp_path / "conf.csv"
+
+    Csv.save(path, {"KEY": "value", "database": {"host": "localhost", "port": 5432}})
+
+    assert Csv.load(path) == {"KEY": "value", "database.host": "localhost", "database.port": "5432"}
+    with path.open(newline="") as file:
+        rows = list(csv_module.DictReader(file))
+    assert rows == [
+        {"key": "KEY", "value": "value"},
+        {"key": "database.host", "value": "localhost"},
+        {"key": "database.port", "value": "5432"},
+    ]
+
+
+def test_csv_parser_rejects_missing_required_header(tmp_path):
+    path = tmp_path / "invalid.csv"
+    path.write_text("name,value\nKEY,value\n")
+
+    with pytest.raises(ValueError, match="key,value"):
+        Csv.load(path)
+
+
+def test_csv_file_loads_when_parser_is_inferred(tmp_path):
+    path = tmp_path / "conf.csv"
+    path.write_text("key,value\nKEY,value\ndatabase.host,localhost\ndatabase.port,5432\n")
+
+    conf = Confease(path, parser=None)
+
+    assert conf.get_item("KEY") == Confitem("KEY", "value", USR)
+    assert conf.get_item("database.host") == Confitem("database.host", "localhost", USR)
+    assert conf.get_item("database.port") == Confitem("database.port", "5432", USR)
+
+
+def test_confease_saves_nested_values_as_csv(tmp_path):
+    path = tmp_path / "conf.csv"
+    conf = Confease(path, parser=Csv)
+
+    conf.set("database.host", "localhost")
+    conf.set("database.port", 5432)
+    conf.save()
+
+    assert Csv.load(path) == {"database.host": "localhost", "database.port": "5432"}
 
 
 def test_json_file_loads_when_parser_is_inferred(tmp_path):
@@ -351,6 +399,7 @@ def test_parser_registry_maps_yaml_extensions_to_yaml_class():
     assert PARSER_CLASSES[".yml"] is Yaml
     assert PARSER_CLASSES[".json"] is Json
     assert PARSER_CLASSES[".toml"] is Toml
+    assert PARSER_CLASSES[".csv"] is Csv
 
 
 def test_base_parser_methods_raise_not_implemented(tmp_path):
