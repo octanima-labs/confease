@@ -13,8 +13,11 @@ CLI > ENV > USER CONF > DEFAULT CONF
 """
 from argparse import Namespace
 from collections.abc import Mapping
+import os
 from pathlib import Path
 from typing import Any
+
+import yaml
 
 from confease.parsers import PARSER_CLASSES, PARSERS, Parser, Yaml
 
@@ -306,25 +309,37 @@ class Confease:
         pass
 
     
-    def load_sources(self, cli: Namespace | None = None, preference: list[str] | None = None, *files):
-        self.preference = preference
+    def load_sources(self, cli: Namespace | None = None, *files, preference: list[str] | None = None):
+        if preference is not None:
+            self.preference = preference
         self.reload_files(*files)
         self.reload_env()
         if cli:
             self.reload_cli(cli)
 
     def reload_files(self, *paths):
-        # Read all paths, initialize values in order. Update values in self
-        # if path is within user's home dir => user file => origin = USR
-        # else => system file => origin = SYS
-        pass
+        for path in paths:
+            load_path = Path(path).expanduser()
+            if not load_path.exists():
+                raise FileNotFoundError(load_path)
+
+            parser = PARSER_CLASSES.get(load_path.suffix)
+            if parser is None:
+                raise ValueError(f"Unknown parser for '{load_path}'. Allowed: {PARSERS}")
+
+            origin = USR if load_path.resolve().is_relative_to(Path.home().resolve()) else SYS
+            for key, value in self._flatten_mapping(parser.load(load_path)).items():
+                self._set_item(key, value, origin)
     
     def reload_cli(self, namespace: Namespace):
-        # depending on self._preference, decide if overwrite the value or not
-        # origin = CLI
-        pass
+        data = {key: value for key, value in vars(namespace).items() if value is not None}
+        for key, value in self._flatten_mapping(data).items():
+            self._set_item(key, value, CLI)
 
     def reload_env(self):
-        # depending on self._preference, decide if overwrite the value or not
-        # origin = ENV
-        pass
+        if self._entries is None:
+            self.reset()
+        entries = self._entries or []
+        for key in {entry.key for entry in entries}:
+            if key in os.environ:
+                self._set_item(key, yaml.safe_load(os.environ[key]), ENV)
