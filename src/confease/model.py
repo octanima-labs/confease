@@ -15,10 +15,12 @@ from argparse import Namespace
 from collections.abc import Mapping
 import os
 from pathlib import Path
+import tempfile
 from typing import Any
 
 import yaml
 
+from confease.editors import TextEditor
 from confease.parsers import PARSER_CLASSES, PARSERS, Parser, Yaml
 
 
@@ -98,6 +100,7 @@ class Confease:
         self._preference: list[str] | None = None
         self._template: Path | None = None
         self._parser: type[Parser]
+        self.editor = TextEditor()
         self.preference = preference
 
 
@@ -262,18 +265,22 @@ class Confease:
             self._set_item(str(key), value, USR, force=True)
         return
     
+    def _data_for_save(self, user_only: bool = True) -> dict[str, Any]:
+        """Return nested mapping data for persistence."""
+        if self._entries is None:
+            self.reset()
+        entries = self._entries or []
+        return self._nest_mapping(
+            {entry.key: entry.value for entry in entries if not user_only or entry.origin == USR}
+        )
+
     def save(self, user_only: bool = True):
         """Persist configuration to the instance path, optionally including all origins."""
         if self._path is None:
             return
 
-        if self._entries is None:
-            self.reset()
         self._path.parent.mkdir(parents=True, exist_ok=True)
-        entries = self._entries or []
-        data = self._nest_mapping(
-            {entry.key: entry.value for entry in entries if not user_only or entry.origin == USR}
-        )
+        data = self._data_for_save(user_only)
         self._parser.save(self._path, data)
 
     def reset(self):
@@ -339,14 +346,45 @@ class Confease:
         self.set(key, value)
     
     def __str__(self):
-        """Return a printable configuration representation once implemented."""
+        """Return a printable configuration representation (short version) once implemented."""
+        # print the configuration in the console
+        pass
+
+    def to_str(self):
+        """Return a printable configuration representation (detailed version) once implemented."""
         # print the configuration in the console
         pass
     
-    def text_edit(self):
-        """Open an interactive config editor once implemented."""
-        # open terminal text-editor to edit the configuration in real-time
-        pass
+    def text_edit(self, user_only: bool = True):
+        """Open the configured editor, validate changes, and persist them."""
+        if self._path is None:
+            raise FileNotFoundError("No configuration path provided")
+
+        edit_path = self._path.expanduser()
+        edit_path.parent.mkdir(parents=True, exist_ok=True)
+        data = self._data_for_save(user_only)
+        draft_path: Path | None = None
+
+        try:
+            with tempfile.NamedTemporaryFile(
+                suffix=edit_path.suffix,
+                prefix=f".{edit_path.name}.",
+                dir=edit_path.parent,
+                delete=False,
+            ) as draft_file:
+                draft_path = Path(draft_file.name)
+
+            self._parser.save(draft_path, data)
+            self.editor.open(draft_path)
+            edited_data = self._parser.load(draft_path)
+            self._flatten_mapping(edited_data)
+            draft_path.replace(edit_path)
+        finally:
+            if draft_path is not None and draft_path.exists():
+                draft_path.unlink()
+
+        self.load()
+        return self
 
     
     def load_sources(self, cli: Namespace | None = None, *files, preference: list[str] | None = None):
