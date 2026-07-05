@@ -35,39 +35,39 @@ def test_text_editor_adds_known_visual_wait_flags(monkeypatch):
     assert TextEditor("code --wait")._editor_command() == ["code", "--wait"]
 
 
-def test_text_edit_validates_draft_before_replacing_file(tmp_path):
+def test_edit_file_validates_draft_before_replacing_file(tmp_path):
     path = tmp_path / "conf.yaml"
     path.write_text("KEY: original\n")
     conf = Confease(path)
     conf.editor = WritingEditor("- invalid\n")
 
     with pytest.raises(ValueError, match="key-value mapping"):
-        conf.text_edit()
+        conf.edit_file()
 
     assert path.read_text() == "KEY: original\n"
     assert conf.get("KEY") == "original"
 
 
-def test_text_edit_persists_valid_user_config_edits(tmp_path):
+def test_edit_file_persists_valid_user_config_edits(tmp_path):
     path = tmp_path / "conf.yaml"
     conf = Confease(path, DEFAULT="default")
     conf.set("USER", "old")
     conf.editor = WritingEditor("USER: new\n")
 
-    conf.text_edit()
+    conf.edit_file()
 
     assert yaml.safe_load(path.read_text()) == {"USER": "new"}
     assert conf.get("DEFAULT") == "default"
     assert conf.get("USER") == "new"
 
 
-def test_text_edit_can_create_missing_file_from_effective_config(tmp_path):
+def test_edit_file_can_create_missing_file_from_effective_config(tmp_path):
     path = tmp_path / "conf.yaml"
     editor = WritingEditor("KEY: edited\n")
     conf = Confease(path, KEY="default")
     conf.editor = editor
 
-    conf.text_edit(user_only=False)
+    conf.edit_file(user_only=False)
 
     assert yaml.safe_load(editor.initial_content) == {"KEY": "default"}
     assert yaml.safe_load(path.read_text()) == {"KEY": "edited"}

@@ -355,7 +355,7 @@ class Confease:
         # print the configuration in the console
         pass
     
-    def text_edit(self, user_only: bool = True):
+    def edit_file(self, user_only: bool = True):
         """Open the configured editor, validate changes, and persist them."""
         if self._path is None:
             raise FileNotFoundError("No configuration path provided")

@@ -59,10 +59,10 @@ Edit the configured file in a blocking text editor:
 from confease import TextEditor
 
 CONF.editor = TextEditor("code")
-CONF.text_edit(user_only=True)
+CONF.edit_file(user_only=True)
 ```
 
-`text_edit()` writes a temporary draft first, opens it in the editor, validates the edited content with the active parser, and only then replaces the real config file. Invalid edited content raises an error and leaves the previous file and in-memory values unchanged. Pass `user_only=False` to edit the full effective config instead of only user-origin values.
+`edit_file()` writes a temporary draft first, opens it in the editor, validates the edited content with the active parser, and only then replaces the real config file. Invalid edited content raises an error and leaves the previous file and in-memory values unchanged. Pass `user_only=False` to edit the full effective config instead of only user-origin values.
 
 ## Nested Keys
 
