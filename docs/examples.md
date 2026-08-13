@@ -11,6 +11,7 @@ from confease import Confease
 
 parser = ArgumentParser()
 parser.add_argument("--debug", dest="DEBUG", action="store_true")
+parser.add_argument("--log-level", dest="LOG_LEVEL")
 args = parser.parse_args()
 
 conf = Confease(
@@ -22,6 +23,8 @@ conf = Confease(
 
 conf.load_sources(args, "/etc/my-app/conf.yaml")
 ```
+
+If `--debug` is provided, the CLI-origin value wins over values from environment variables, files, and defaults under the default precedence.
 
 ## Save User Preferences
 
@@ -81,3 +84,19 @@ Section dictionaries are snapshots. Write nested values through dotted keys:
 ```python
 conf["database.host"] = "db.internal"
 ```
+
+## Edit a Config File
+
+Let a user edit only persisted user preferences while keeping defaults in code:
+
+```python
+from confease import Confease, TextEditor
+
+conf = Confease("~/.config/my-app/conf.yaml", THEME="light")
+conf.set("THEME", "dark")
+conf.editor = TextEditor("nano")
+
+conf.edit_file(user_only=True)
+```
+
+The edit happens in a temporary draft. If the edited file is invalid for the active parser, the original file is kept.

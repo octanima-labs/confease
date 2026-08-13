@@ -36,9 +36,25 @@ EDITORS = [*TERMINAL_EDITORS, *VISUAL_EDITORS]
 
 
 class TextEditor:
-    """Small blocking text-editor launcher."""
+    """Small blocking text-editor launcher.
+
+    ``TextEditor`` resolves an explicit editor command, ``EDITOR``/``VISUAL``,
+    or a small list of common terminal and visual editors. Known visual editors
+    receive a wait flag when needed so callers can safely read the file after
+    the process exits.
+    """
 
     def __init__(self, editor: str | None = None):
+        """Create an editor launcher.
+
+        Args:
+            editor: Optional shell-style editor command, for example
+                ``"nano -w"`` or ``"code --wait"``. When omitted, the launcher
+                auto-detects an available editor.
+
+        Raises:
+            RuntimeError: If the command string cannot be parsed or is empty.
+        """
         self._editor: list[str] | None = None
         self.editor = editor
 
@@ -49,6 +65,7 @@ class TextEditor:
 
     @editor.setter
     def editor(self, value: str | None):
+        """Configure an explicit editor command or return to auto-detection."""
         if value is None:
             self._editor = None
             return
@@ -72,12 +89,18 @@ class TextEditor:
 
     @staticmethod
     def _split_env_editor(value: str) -> list[str]:
+        """Parse an editor command from an environment variable."""
         try:
             return shlex.split(value)
         except ValueError as exc:
             raise RuntimeError(f"Invalid editor command: {value}") from exc
 
     def _editor_command(self) -> list[str]:
+        """Return the first available editor command.
+
+        Raises:
+            RuntimeError: If no configured or auto-detected editor is available.
+        """
         if self._editor:
             editors = [self._editor]
         else:
@@ -94,7 +117,18 @@ class TextEditor:
         raise RuntimeError(f"Text editor not found '{self._editor}'" if self._editor else "No text editor found")
 
     def open(self, path: str | Path) -> str:
-        """Open the configured editor and return the edited path."""
+        """Open the configured editor for an existing or new file path.
+
+        Args:
+            path: File path to open.
+
+        Returns:
+            The expanded file path as a string after the editor exits.
+
+        Raises:
+            ValueError: If ``path`` is ``None``.
+            Exception: If the editor cannot be launched or exits unsuccessfully.
+        """
         if path is None:
             raise ValueError("Path not provided")
         try:
@@ -108,6 +142,14 @@ class TextEditor:
             raise Exception(f"text editor process failed: {error}") from error
 
     def read(self):
+        """Open a temporary file and return its contents after editing.
+
+        Returns:
+            The text written by the editor.
+
+        Raises:
+            Exception: If the editor cannot be launched or exits unsuccessfully.
+        """
         try:
             with tempfile.NamedTemporaryFile(
                 mode="w+",

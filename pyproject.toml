@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "confease"
 version = "0.1.0"
-description = "Project description"
+description = "Small Python configuration helper with predictable source precedence"
 readme = "README.md"
 license = "MIT"
 authors = [
@@ -29,9 +29,9 @@ dependencies = [
 ]
 
 [project.urls]
-Repository = "REPO_URL"
-Documentation = "DOCS_URL"
-Issues = "ISSUES_URL"
+Repository = "https://github.com/octanima-labs/confease"
+Documentation = "https://octanima-labs.github.io/confease"
+Issues = "https://github.com/octanima-labs/confease/issues"
 
 [dependency-groups]
 dev = [

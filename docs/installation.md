@@ -1,22 +1,26 @@
 # Installation
 
+`confease` requires Python 3.11 or newer.
+
 Install the package from PyPI when it is available:
 
 ```bash
 pip install confease
 ```
 
-For local development, run commands from the `public/` project directory:
+## From Source
+
+For local development, clone the repository and run commands from the `public/` project directory:
 
 ```bash
+git clone https://github.com/octanima-labs/confease.git
+cd confease/public
 hatch run pytest
 ```
 
-## Python Support
+The outer repository is an agent-facing workspace. The Python package, tests, build metadata, README, and docs live under `public/`.
 
-`confease` requires Python 3.11 or newer.
-
-## Optional Development Commands
+## Development Commands
 
 The project uses Hatch environments for common checks:
 
@@ -32,3 +36,5 @@ Build these docs with:
 ```bash
 hatch run docs:build
 ```
+
+This command runs Sphinx with warnings treated as errors.

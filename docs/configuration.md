@@ -88,6 +88,14 @@ conf.reload_cli(Namespace(DEBUG=True, PORT=None))
 
 In this example, `DEBUG` is loaded as a CLI value and `PORT` is ignored.
 
+For nested values, pass a one-level dictionary in the namespace value. It is flattened into dotted keys:
+
+```python
+conf.reload_cli(Namespace(database={"host": "db.internal"}))
+
+conf["database.host"]
+```
+
 ## Persistence
 
 Call `save()` to persist configuration back to the path configured on the `Confease` instance:
@@ -99,3 +107,25 @@ conf.save()
 ```
 
 If the instance was created without a path, `save()` is a no-op.
+
+## Editing Files Safely
+
+Use `edit_file()` when you want users or maintainers to edit the configured file manually:
+
+```python
+from confease import Confease, TextEditor
+
+conf = Confease("~/.config/my-app/conf.yaml", DEBUG=False)
+conf.editor = TextEditor("code")
+conf.edit_file(user_only=True)
+```
+
+`edit_file()` writes a temporary draft first, opens it in the configured editor, parses the edited draft, and only replaces the real file after validation succeeds. Invalid edits raise an error and leave the previous file and in-memory values unchanged.
+
+## Limitations
+
+- Nested configuration keys support one level only.
+- Environment loading only considers keys already known from defaults or loaded files.
+- `save()` writes only `USR` entries by default; use `save(user_only=False)` to write the full effective configuration.
+- Runtime-only configurations created without a path do not persist when saved.
+- `__str__()` and `to_str()` are reserved for future printable representations and are not currently implemented.

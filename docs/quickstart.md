@@ -7,7 +7,9 @@ from argparse import ArgumentParser
 
 from confease import Confease
 
-args = ArgumentParser().parse_args()
+parser = ArgumentParser()
+parser.add_argument("--debug", dest="DEBUG", action="store_true")
+args = parser.parse_args()
 
 CONF = Confease(
     "~/.config/my-app/conf.yaml",
@@ -19,14 +21,16 @@ CONF = Confease(
 CONF.load_sources(args, "/etc/my-app/conf.yaml")
 ```
 
+`load_sources()` loads files first, then known environment variables, then non-`None` values from the `argparse.Namespace`. Source precedence decides which value wins when multiple sources define the same key.
+
 Read values with `get()` or indexed access:
 
 ```python
-CONF.get("APP_DIR")
-CONF["APP_DIR"]
-CONF.get("MISSING")
-CONF["MISSING"]
-CONF.get("DEBUG", cast=bool)
+CONF.get("APP_DIR")          # "~/Apps"
+CONF["APP_DIR"]             # "~/Apps"
+CONF.get("MISSING")          # None
+CONF["MISSING"]             # None
+CONF.get("DEBUG", cast=bool) # False
 ```
 
 Update values with `set()` or indexed assignment:
@@ -56,6 +60,8 @@ Section access returns a plain snapshot dictionary. Use dotted keys or `set()` t
 CONF["database.port"] = 5433
 ```
 
+Keys can only nest one level. A config cannot contain both a scalar key and a section with the same name, such as `database` and `database.host`.
+
 ## Parser Selection
 
 The parser can be inferred from the configured path suffix by passing `parser=None`:
@@ -73,3 +79,5 @@ from confease import Confease, Json
 
 conf = Confease("conf.json", parser=Json)
 ```
+
+See [File Formats](file-formats.md) for the exact on-disk shape of each parser.

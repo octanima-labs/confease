@@ -11,6 +11,22 @@
 - `.xml`
 - `.csv`
 
+Pass `parser=None` to infer one of these parsers from the configured path suffix:
+
+```python
+from confease import Confease
+
+conf = Confease("settings.toml", parser=None)
+```
+
+Pass a parser class when you want to be explicit:
+
+```python
+from confease import Confease, Json
+
+conf = Confease("settings.json", parser=Json)
+```
+
 ## YAML
 
 YAML uses PyYAML and stores nested sections as ordinary YAML mappings:
@@ -98,3 +114,9 @@ CSV values are serialized as YAML scalar text and loaded with `yaml.safe_load`.
 All formats support at most one nested level. Internally, nested leaves are represented as dotted keys such as `database.host`.
 
 Scalar keys and section keys cannot collide. For example, a config cannot contain both `database` and `database.host` as separate values.
+
+## Type Round-Tripping
+
+YAML, JSON, and TOML rely on their native type systems. INI, XML, and CSV store individual values as YAML scalar text and parse them with `yaml.safe_load`, which preserves common scalar values such as booleans, numbers, nulls, and simple lists.
+
+This means strings that look like YAML scalars may load as non-string Python values. Quote values in the file when you need to force a string representation.
