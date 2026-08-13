@@ -1,24 +1,20 @@
-"""
-Class to set a conf file programatically
-Supports several parsers:
-- yaml
-- json
-- cnf
-- toml
-- xml
-- csv (no headings)
+"""Core configuration model for ``confease``.
 
-Conf is overriden in this way:
-CLI > ENV > USER CONF > DEFAULT CONF
+The module exposes :class:`Confease`, a small configuration container that
+combines in-code defaults, configuration files, environment variables, and
+``argparse`` namespaces. Conflicts are resolved by origin precedence, which
+defaults to ``CLI > ENV > SYS > USR > DEF``.
 """
 from argparse import Namespace
 from collections.abc import Mapping
 import os
 from pathlib import Path
+import tempfile
 from typing import Any
 
 import yaml
 
+from confease.editors import TextEditor
 from confease.parsers import PARSER_CLASSES, PARSERS, Parser, Yaml
 
 
@@ -37,10 +33,26 @@ ORIGINS = [
 ]
 
 class Confitem:
-    """Single flattened configuration value with its source origin."""
+    """Single flattened configuration value with its source origin.
+
+    ``Confease`` stores effective configuration as ``Confitem`` leaves. Nested
+    values use dotted keys such as ``"database.host"`` while preserving the
+    original Python value type.
+    """
 
     def __init__(self, key: str, value: Any, origin: str):
-        """Create a config item, validating that the origin is supported."""
+        """Create a configuration item.
+
+        Args:
+            key: Configuration key. Nested leaves are represented with one
+                dotted level, for example ``"database.host"``.
+            value: Stored Python value. Values are not coerced to strings.
+            origin: Source origin for the value. Must be one of
+                :data:`ORIGINS`.
+
+        Raises:
+            ValueError: If ``origin`` is not a supported source origin.
+        """
         self._key = str(key)
         self._value = value
         if origin in ORIGINS:
@@ -83,10 +95,39 @@ class Confitem:
 
 
 class Confease:
-    """Configuration container with defaults, persistence, and source precedence."""
+    """Configuration container with defaults, persistence, and precedence.
+
+    ``Confease`` keeps one effective value per key. Values can come from
+    defaults, files, environment variables, or command-line namespaces, and the
+    configured ``preference`` decides which origin wins when multiple sources
+    define the same key.
+
+    The container supports one nested level. Nested mappings are flattened into
+    dotted ``Confitem`` leaves internally, while nested-capable file formats are
+    saved and loaded as ordinary nested mappings.
+    """
 
     def __init__(self, path: str | Path | None = None, reload: bool = False, parser: type[Parser] | None = Yaml, template: str | Path | None = None, preference = [CLI, ENV, SYS, USR, DEF], **kwargs):
-        """Initialize a configuration object from optional defaults and file path."""
+        """Initialize a configuration object.
+
+        Args:
+            path: Configuration file path. When omitted, the instance is
+                runtime-only and ``save()`` does not persist anything.
+            reload: If true, reload the configured file before value reads and
+                save immediately after ``set()``.
+            parser: Parser class used for ``path``. Pass ``None`` to infer the
+                parser from the file suffix.
+            template: Optional default configuration file. Templates cannot be
+                combined with keyword defaults.
+            preference: Origins ordered from highest to lowest priority.
+                Omitted origins are appended after the provided ones.
+            **kwargs: In-code default configuration values. One-level nested
+                dictionaries are accepted.
+
+        Raises:
+            AttributeError: If both ``template`` and keyword defaults are given.
+            ValueError: If the parser or source preference is invalid.
+        """
         if path is None:
             self._path: Path | None = None
             print("[-] Runtime-only configuration. No path provided, so conf file will not persist")
@@ -98,6 +139,7 @@ class Confease:
         self._preference: list[str] | None = None
         self._template: Path | None = None
         self._parser: type[Parser]
+        self.editor = TextEditor()
         self.preference = preference
 
 
@@ -248,7 +290,16 @@ class Confease:
         self._entries.append(incoming)
     
     def load(self, path: str | Path | None = None):
-        """Load configuration values from a file as user-origin entries."""
+        """Load configuration values from a file as user-origin entries.
+
+        Args:
+            path: Optional file path to load instead of the instance path.
+
+        Raises:
+            FileNotFoundError: If no path is available or the target file does
+                not exist.
+            ValueError: If the parser rejects the file shape or keys collide.
+        """
         # param path allows to override the load file
         load_path = Path(path).expanduser() if path is not None else self._path
         if load_path is None:
@@ -262,22 +313,36 @@ class Confease:
             self._set_item(str(key), value, USR, force=True)
         return
     
+    def _data_for_save(self, user_only: bool = True) -> dict[str, Any]:
+        """Return nested mapping data for persistence."""
+        if self._entries is None:
+            self.reset()
+        entries = self._entries or []
+        return self._nest_mapping(
+            {entry.key: entry.value for entry in entries if not user_only or entry.origin == USR}
+        )
+
     def save(self, user_only: bool = True):
-        """Persist configuration to the instance path, optionally including all origins."""
+        """Persist configuration to the instance path.
+
+        Args:
+            user_only: When true, write only ``USR`` entries. When false, write
+                all effective entries, including defaults and overrides from
+                other origins.
+
+        Notes:
+            Runtime-only configurations created without ``path`` are a no-op
+            when saved.
+        """
         if self._path is None:
             return
 
-        if self._entries is None:
-            self.reset()
         self._path.parent.mkdir(parents=True, exist_ok=True)
-        entries = self._entries or []
-        data = self._nest_mapping(
-            {entry.key: entry.value for entry in entries if not user_only or entry.origin == USR}
-        )
+        data = self._data_for_save(user_only)
         self._parser.save(self._path, data)
 
     def reset(self):
-        """Reset entries to defaults or reload from the configured template."""
+        """Reset in-memory entries to defaults or the configured template."""
         print("Setting default configuration...")
         if self._template:
             # TODO: copy self._template to self._path 
@@ -288,7 +353,18 @@ class Confease:
             return
 
     def get(self, key: str, default = None, cast = None):
-        """Return a value or section by key, optionally casting the result."""
+        """Return a value or one-level section by key.
+
+        Args:
+            key: Scalar key, dotted nested key, or section name.
+            default: Value returned when neither a leaf nor a section exists.
+            cast: Optional callable used to coerce the returned value. Cast
+                failures are reported and the original value is returned.
+
+        Returns:
+            The stored value, a plain dictionary snapshot for section reads, or
+            ``default`` when the key is missing.
+        """
         item = self.get_item(key)
         val = item.value if item is not None else self._get_section(key)
         if val is None:
@@ -301,7 +377,15 @@ class Confease:
         return val
     
     def get_item(self, key: str) -> Confitem | None:
-        """Return the matching config item, or None if no leaf item exists."""
+        """Return the matching leaf item.
+
+        Args:
+            key: Scalar or dotted key to look up.
+
+        Returns:
+            The matching ``Confitem``, or ``None`` when no leaf exists. Section
+            names do not return an item; use ``get()`` for section snapshots.
+        """
         if self._entries is None:
             self.reset()
         elif self._reload:
@@ -323,7 +407,18 @@ class Confease:
         return section or None
 
     def set(self, key: str, value: Any):
-        """Store a user-origin value, supporting dotted keys and nested dict values."""
+        """Store a user-origin value.
+
+        Args:
+            key: Scalar key, dotted nested key, or section name when ``value``
+                is a one-level mapping.
+            value: Python value to store. Nested dictionaries are flattened into
+                dotted leaves.
+
+        Raises:
+            ValueError: If nested keys exceed one level or a scalar key collides
+                with a section key.
+        """
         items = self._flatten_mapping({key: value})
         for item_key, item_value in items.items():
             self._set_item(item_key, item_value, USR, force=True)
@@ -331,26 +426,91 @@ class Confease:
             self.save()
 
     def __getitem__(self, key: str):
-        """Return `get(key)` so missing keys produce None."""
+        """Return ``get(key)`` so missing keys produce ``None``."""
         return self.get(key)
 
     def __setitem__(self, key: str, value: Any):
-        """Assign through `set(key, value)`."""
+        """Assign through ``set(key, value)``."""
         self.set(key, value)
     
     def __str__(self):
-        """Return a printable configuration representation once implemented."""
+        """Reserved for a future short printable representation."""
+        # print the configuration in the console
+        pass
+
+    def to_str(self):
+        """Reserved for a future detailed printable representation."""
         # print the configuration in the console
         pass
     
-    def text_edit(self):
-        """Open an interactive config editor once implemented."""
-        # open terminal text-editor to edit the configuration in real-time
-        pass
+    def edit_file(self, user_only: bool = True):
+        """Edit the configured file through a blocking text editor.
+
+        The current data is written to a temporary draft, opened in
+        ``self.editor``, parsed with the active parser, and only then moved over
+        the real config file. Invalid edited content leaves the previous file
+        and in-memory values unchanged.
+
+        Args:
+            user_only: When true, edit only user-origin entries. When false,
+                edit the full effective configuration.
+
+        Returns:
+            The current ``Confease`` instance.
+
+        Raises:
+            FileNotFoundError: If the instance has no configured path.
+            ValueError: If the edited file is invalid for the active parser.
+            Exception: If launching or waiting for the editor fails.
+        """
+        if self._path is None:
+            raise FileNotFoundError("No configuration path provided")
+
+        edit_path = self._path.expanduser()
+        edit_path.parent.mkdir(parents=True, exist_ok=True)
+        data = self._data_for_save(user_only)
+        draft_path: Path | None = None
+
+        try:
+            with tempfile.NamedTemporaryFile(
+                suffix=edit_path.suffix,
+                prefix=f".{edit_path.name}.",
+                dir=edit_path.parent,
+                delete=False,
+            ) as draft_file:
+                draft_path = Path(draft_file.name)
+
+            self._parser.save(draft_path, data)
+            self.editor.open(draft_path)
+            edited_data = self._parser.load(draft_path)
+            self._flatten_mapping(edited_data)
+            draft_path.replace(edit_path)
+        finally:
+            if draft_path is not None and draft_path.exists():
+                draft_path.unlink()
+
+        self.load()
+        return self
 
     
     def load_sources(self, cli: Namespace | None = None, *files, preference: list[str] | None = None):
-        """Reload file, environment, and CLI sources using configured precedence."""
+        """Reload file, environment, and CLI sources.
+
+        Sources are loaded in file, environment, then CLI order. When the same
+        key appears more than once, the configured origin preference determines
+        the effective value.
+
+        Args:
+            cli: Optional ``argparse.Namespace`` whose non-``None`` values are
+                loaded with ``CLI`` origin.
+            *files: Additional config files. Files under the current user's home
+                directory are ``USR`` origin; all others are ``SYS`` origin.
+            preference: Optional source precedence override.
+
+        Raises:
+            FileNotFoundError: If any file path does not exist.
+            ValueError: If a file suffix, preference, or key shape is invalid.
+        """
         if preference is not None:
             self.preference = preference
         self.reload_files(*files)
@@ -359,7 +519,16 @@ class Confease:
             self.reload_cli(cli)
 
     def reload_files(self, *paths):
-        """Load additional config files as system or user origins."""
+        """Load additional config files as system or user origins.
+
+        Args:
+            *paths: Config file paths. Parser selection is inferred from each
+                suffix.
+
+        Raises:
+            FileNotFoundError: If a path does not exist.
+            ValueError: If a suffix is unsupported or loaded keys collide.
+        """
         for path in paths:
             load_path = Path(path).expanduser()
             if not load_path.exists():
@@ -374,13 +543,24 @@ class Confease:
                 self._set_item(key, value, origin)
     
     def reload_cli(self, namespace: Namespace):
-        """Load non-None argparse namespace values as CLI-origin entries."""
+        """Load non-``None`` argparse namespace values as CLI-origin entries.
+
+        Args:
+            namespace: Parsed command-line namespace. Attribute names become
+                config keys, and nested dictionaries are flattened one level.
+        """
         data = {key: value for key, value in vars(namespace).items() if value is not None}
         for key, value in self._flatten_mapping(data).items():
             self._set_item(key, value, CLI)
 
     def reload_env(self):
-        """Load known environment variables as ENV-origin entries with YAML parsing."""
+        """Load known environment variables as ENV-origin entries.
+
+        Only keys already present in defaults or loaded entries are considered.
+        Values are parsed with ``yaml.safe_load`` so common scalar text such as
+        ``true``, ``5432``, ``null``, or ``[1, 2]`` becomes the corresponding
+        Python value.
+        """
         if self._entries is None:
             self.reset()
         entries = self._entries or []

@@ -8,6 +8,7 @@ from confease.model import (
     Confease,
     Confitem,
 )
+from confease.editors import TextEditor
 from confease.parsers import (
     CFG,
     CONF,
@@ -45,6 +46,7 @@ __all__ = [
     "PARSER_CLASSES",
     "PARSERS",
     "SYS",
+    "TextEditor",
     "TOML",
     "USR",
     "XML",

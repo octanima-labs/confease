@@ -9,7 +9,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 project = "confease"
 author = "octanima-labs"
-copyright = "2026, souppot contributors"
+copyright = "2026, octanima-labs"
 release = "0.1.0"
 
 extensions = [
@@ -38,4 +38,11 @@ html_title = "confease documentation"
 html_theme_options = {
     "navigation_depth": 3,
     "show_toc_level": 2,
+}
+
+html_context = {
+    "github_user": "octanima-labs",
+    "github_repo": "confease",
+    "github_version": "main",
+    "doc_path": "public/docs",
 }
