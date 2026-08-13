@@ -37,6 +37,7 @@ Issues = "https://github.com/octanima-labs/confease/issues"
 dev = [
   "build",
   "mypy",
+  "pre-commit",
   "pytest",
   "ruff",
   "types-PyYAML",
@@ -62,6 +63,7 @@ ignore_missing_imports = true
 dependencies = [
   "build",
   "mypy",
+  "pre-commit",
   "pytest",
   "ruff",
   "types-PyYAML",
