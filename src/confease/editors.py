@@ -1,15 +1,14 @@
 import os
-from pathlib import Path
 import shlex
 import shutil
 import subprocess
 import tempfile
-
+from pathlib import Path
 
 __all__ = [
+    "EDITORS",
     "TERMINAL_EDITORS",
     "VISUAL_EDITORS",
-    "EDITORS",
     "TextEditor",
 ]
 
@@ -122,6 +121,10 @@ class TextEditor:
         Args:
             path: File path to open.
 
+        Notes:
+            The launcher does not create or open the file itself. A missing
+            file is created only if the editor saves it.
+
         Returns:
             The expanded file path as a string after the editor exits.
 
@@ -133,13 +136,12 @@ class TextEditor:
             raise ValueError("Path not provided")
         try:
             abs_path = Path(path).expanduser()
-            with open(abs_path, mode="a+", encoding="utf-8") as message_file:
-                subprocess.run([*self._editor_command(), message_file.name], check=True)
-                return str(abs_path)
+            subprocess.run([*self._editor_command(), str(abs_path)], check=True)
+            return str(abs_path)
         except OSError as error:
-            raise Exception(f"could not open text editor: {error}") from error
+            raise Exception(f"could not open text editor: {error}") from error  # noqa: TRY002 - preserve launcher error API
         except subprocess.CalledProcessError as error:
-            raise Exception(f"text editor process failed: {error}") from error
+            raise Exception(f"text editor process failed: {error}") from error  # noqa: TRY002 - preserve launcher error API
 
     def read(self):
         """Open a temporary file and return its contents after editing.
@@ -159,9 +161,9 @@ class TextEditor:
                 message_file.seek(0)
                 return message_file.read()
         except OSError as error:
-            raise Exception(f"could not open text editor: {error}") from error
+            raise Exception(f"could not open text editor: {error}") from error  # noqa: TRY002 - preserve launcher error API
         except subprocess.CalledProcessError as error:
-            raise Exception(f"text editor process failed: {error}") from error
+            raise Exception(f"text editor process failed: {error}") from error  # noqa: TRY002 - preserve launcher error API
 
 
 def usage():

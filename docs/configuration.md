@@ -10,7 +10,7 @@ The supported origins are:
 - `ENV`: environment variables loaded by `reload_env()`.
 - `SYS`: config files outside the current user's home directory.
 - `USR`: config files inside the current user's home directory and values assigned with `set()`.
-- `DEF`: defaults passed as keyword arguments to `Confease(...)`.
+- `DEF`: keyword defaults or values read from a configured template.
 
 By default, precedence is ordered from highest to lowest priority:
 
@@ -58,6 +58,26 @@ conf = Confease(
 ```
 
 Defaults are memory-only unless explicitly saved. By default, `save()` writes only user-origin entries. Use `save(user_only=False)` to write all current entries, including defaults and loaded overrides.
+
+### Templates And Explicit Reset
+
+Alternatively, provide an existing template file instead of keyword defaults:
+
+```python
+conf = Confease("settings.yaml", template="defaults.yaml")
+```
+
+Both files use the configured active parser. Template values become `DEF` defaults and provide fallbacks for keys absent from the target. Existing target values load as `USR`. Initializing or reading configuration does not create a missing target or overwrite an existing one.
+
+To deliberately restore the persisted file, call:
+
+```python
+conf.reset()
+```
+
+With a template, this is a destructive restore: it validates the template, copies its exact bytes over the configured path, and reloads the restored values as `USR`. Comments, formatting, and key order are preserved. Missing parent directories are created. Missing or invalid templates and copy failures leave prior file content and entries unchanged.
+
+Template restoration requires a configured target path; a template-backed runtime-only instance raises `FileNotFoundError` on `reset()`. Without a template, `reset()` only restores keyword defaults in memory and does not write or delete a file. Templates cannot be combined with keyword defaults.
 
 ## Environment Variables
 
@@ -108,7 +128,9 @@ conf.save()
 
 If the instance was created without a path, `save()` is a no-op.
 
-## Editing Files Safely
+`save()` serializes values and does not preserve source comments. Use direct editing when users need to maintain the original file text. Failed `load()` validation leaves previous in-memory entries intact.
+
+## Editing Files Manually
 
 Use `edit_file()` when you want users or maintainers to edit the configured file manually:
 
@@ -117,10 +139,16 @@ from confease import Confease, TextEditor
 
 conf = Confease("~/.config/my-app/conf.yaml", DEBUG=False)
 conf.editor = TextEditor("code")
-conf.edit_file(user_only=True)
+conf.edit_file()
 ```
 
-`edit_file()` writes a temporary draft first, opens it in the configured editor, parses the edited draft, and only replaces the real file after validation succeeds. Invalid edits raise an error and leave the previous file and in-memory values unchanged.
+`edit_file()` opens the actual configured path without generating a draft or rewriting its content. Comments and formatting remain under user control. The library creates missing parent directories but leaves creation of the file to a manual editor save. Closing without saving a missing file leaves it absent.
+
+After the editor exits successfully, valid file contents are reloaded. Invalid manually saved content raises a parser or key-validation error and stays on disk; the last valid in-memory entries are retained. Fix and save the file before calling `load()` again. With `reload=True`, subsequent reads also attempt to load that file and will continue to raise until it is fixed.
+
+### Migrating Existing Calls
+
+Replace `conf.edit_file(user_only=True)` and `conf.edit_file(user_only=False)` with `conf.edit_file()`. Entry-origin filtering has been removed from editing because it opens the real file directly. The `user_only` parameter on `save()` is unchanged.
 
 ## Limitations
 

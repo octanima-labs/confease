@@ -5,19 +5,18 @@ combines in-code defaults, configuration files, environment variables, and
 ``argparse`` namespaces. Conflicts are resolved by origin precedence, which
 defaults to ``CLI > ENV > SYS > USR > DEF``.
 """
+import os
+import shutil
+import tempfile
 from argparse import Namespace
 from collections.abc import Mapping
-import os
 from pathlib import Path
-import tempfile
 from typing import Any
 
 import yaml
 
 from confease.editors import TextEditor
 from confease.parsers import PARSER_CLASSES, PARSERS, Parser, Yaml
-
-
 
 CLI = 'cli' # cli params
 ENV = 'env' # Environment variables
@@ -107,7 +106,7 @@ class Confease:
     saved and loaded as ordinary nested mappings.
     """
 
-    def __init__(self, path: str | Path | None = None, reload: bool = False, parser: type[Parser] | None = Yaml, template: str | Path | None = None, preference = [CLI, ENV, SYS, USR, DEF], **kwargs):
+    def __init__(self, path: str | Path | None = None, reload: bool = False, parser: type[Parser] | None = Yaml, template: str | Path | None = None, preference = (CLI, ENV, SYS, USR, DEF), **kwargs):
         """Initialize a configuration object.
 
         Args:
@@ -117,8 +116,10 @@ class Confease:
                 save immediately after ``set()``.
             parser: Parser class used for ``path``. Pass ``None`` to infer the
                 parser from the file suffix.
-            template: Optional default configuration file. Templates cannot be
-                combined with keyword defaults.
+            template: Optional default configuration file, read with the active
+                parser as default-origin values without copying to ``path``.
+                Cannot be combined with keyword defaults. Explicit ``reset()``
+                restores its exact content to ``path`` and reloads it.
             preference: Origins ordered from highest to lowest priority.
                 Omitted origins are appended after the provided ones.
             **kwargs: In-code default configuration values. One-level nested
@@ -126,6 +127,7 @@ class Confease:
 
         Raises:
             AttributeError: If both ``template`` and keyword defaults are given.
+            FileNotFoundError: If the configured template is missing.
             ValueError: If the parser or source preference is invalid.
         """
         if path is None:
@@ -145,7 +147,7 @@ class Confease:
 
         if template:
             if len(kwargs.keys()) == 0:
-                self._template = Path(template)
+                self._template = Path(template).expanduser()
             else:
                 raise AttributeError("Template and default values are not compatible. Use a single default source")
         if parser is None:
@@ -158,6 +160,10 @@ class Confease:
                 self._parser = parser
             else:
                 raise ValueError(f"Unknown parser '{parser}'. Allowed: {PARSERS}")
+
+        if self._template is not None:
+            self._defaults = [Confitem(key, value, DEF) for key, value in
+                              self._flatten_mapping(self._parser.load(self._template)).items()]
 
         if self._path is not None and self._path.exists():
             self.load()
@@ -232,7 +238,7 @@ class Confease:
                     raise ValueError(f"Nested configuration keys support one level only: {key}")
                 for raw_subkey, subvalue in value.items():
                     if isinstance(subvalue, Mapping):
-                        raise ValueError(f"Nested configuration keys support one level only: {key}.{raw_subkey}")
+                        raise ValueError(f"Nested configuration keys support one level only: {key}.{raw_subkey}")  # noqa: TRY004 - invalid config shape is a value error
                     add_item(f"{key}.{raw_subkey}", subvalue)
             else:
                 add_item(key, value)
@@ -275,7 +281,7 @@ class Confease:
     def _set_item(self, key: str, value: Any, origin: str, *, force: bool = False):
         """Set an item if allowed by precedence, or always when forced."""
         if self._entries is None:
-            self.reset()
+            self._initialize_entries()
         if self._entries is None:
             self._entries = []
 
@@ -291,6 +297,10 @@ class Confease:
     
     def load(self, path: str | Path | None = None):
         """Load configuration values from a file as user-origin entries.
+
+        Validate all content and keys before replacing in-memory entries.
+        Failed loads preserve the previous entries; defaults supply keys not
+        defined by the file.
 
         Args:
             path: Optional file path to load instead of the instance path.
@@ -308,15 +318,24 @@ class Confease:
             raise FileNotFoundError(load_path)
         data = self._parser.load(load_path)
 
+        self._entries = self._entries_for_load(data)
+
+    def _entries_for_load(self, data: Mapping[str, Any]) -> list[Confitem]:
+        """Build and validate loaded entries without changing live state."""
+        entries = {entry.key: entry for entry in self._defaults}
+        entries.update({key: Confitem(key, value, USR)
+                        for key, value in self._flatten_mapping(data).items()})
+        self._ensure_no_key_collisions(entries.keys())
+        return list(entries.values())
+
+    def _initialize_entries(self):
+        """Initialize defaults in memory without invoking persistent reset."""
         self._entries = list(self._defaults)
-        for key, value in self._flatten_mapping(data).items():
-            self._set_item(str(key), value, USR, force=True)
-        return
     
     def _data_for_save(self, user_only: bool = True) -> dict[str, Any]:
         """Return nested mapping data for persistence."""
         if self._entries is None:
-            self.reset()
+            self._initialize_entries()
         entries = self._entries or []
         return self._nest_mapping(
             {entry.key: entry.value for entry in entries if not user_only or entry.origin == USR}
@@ -342,15 +361,46 @@ class Confease:
         self._parser.save(self._path, data)
 
     def reset(self):
-        """Reset in-memory entries to defaults or the configured template."""
+        """Restore keyword defaults in memory, or copy the template to disk.
+
+        With a template, explicitly overwrite the configured path with exact
+        template bytes and reload them as user-origin values. Validation or
+        copy failures leave the previous file and in-memory entries unchanged.
+        Without a template, reset only memory and do not write the file.
+
+        Raises:
+            FileNotFoundError: If template restoration lacks a target path or
+                the template is missing.
+            ValueError: If the template has invalid shape or keys.
+            OSError: If copying or replacing the target fails.
+        """
         print("Setting default configuration...")
-        if self._template:
-            # TODO: copy self._template to self._path 
-            self.load()
+        if self._template is None:
+            self._initialize_entries()
             return
-        else:
-            self._entries = list(self._defaults)
-            return
+        if self._path is None:
+            raise FileNotFoundError("No configuration path provided")
+
+        self._flatten_mapping(self._parser.load(self._template))
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        draft_path: Path | None = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                suffix=self._path.suffix, prefix=f".{self._path.name}.",
+                dir=self._path.parent, delete=False,
+            ) as draft_file:
+                draft_path = Path(draft_file.name)
+            shutil.copyfile(self._template, draft_path)
+            # Validate the exact copied document before installing it.
+            values = self._flatten_mapping(self._parser.load(draft_path))
+            defaults = [Confitem(key, value, DEF) for key, value in values.items()]
+            draft_path.replace(self._path)
+        finally:
+            if draft_path is not None and draft_path.exists():
+                draft_path.unlink()
+
+        self._defaults = defaults
+        self.load()
 
     def get(self, key: str, default = None, cast = None):
         """Return a value or one-level section by key.
@@ -372,7 +422,7 @@ class Confease:
         if cast:
             try:
                 val = cast(val)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 - user-provided casts can raise arbitrary exceptions
                 print(f"[!] Unable to cast '{val}' into {cast}. {e}")
         return val
     
@@ -387,7 +437,7 @@ class Confease:
             names do not return an item; use ``get()`` for section snapshots.
         """
         if self._entries is None:
-            self.reset()
+            self._initialize_entries()
         elif self._reload:
             self.load()
         if self._entries is None:
@@ -436,24 +486,22 @@ class Confease:
     def __str__(self):
         """Reserved for a future short printable representation."""
         # print the configuration in the console
-        pass
 
     def to_str(self):
         """Reserved for a future detailed printable representation."""
         # print the configuration in the console
-        pass
     
-    def edit_file(self, user_only: bool = True):
+    def edit_file(self):
         """Edit the configured file through a blocking text editor.
 
-        The current data is written to a temporary draft, opened in
-        ``self.editor``, parsed with the active parser, and only then moved over
-        the real config file. Invalid edited content leaves the previous file
-        and in-memory values unchanged.
+        Open the real path in ``self.editor`` without serializing or creating
+        the file first, preserving existing comments and formatting. The user
+        must save manually. Parent directories are created if needed.
 
-        Args:
-            user_only: When true, edit only user-origin entries. When false,
-                edit the full effective configuration.
+        Valid saved content is reloaded after the editor exits. Invalid saved
+        content raises an error and remains on disk while the previous
+        in-memory entries stay intact. A missing target remains absent if the
+        user does not save; only in-memory defaults are initialized.
 
         Returns:
             The current ``Confease`` instance.
@@ -468,28 +516,11 @@ class Confease:
 
         edit_path = self._path.expanduser()
         edit_path.parent.mkdir(parents=True, exist_ok=True)
-        data = self._data_for_save(user_only)
-        draft_path: Path | None = None
-
-        try:
-            with tempfile.NamedTemporaryFile(
-                suffix=edit_path.suffix,
-                prefix=f".{edit_path.name}.",
-                dir=edit_path.parent,
-                delete=False,
-            ) as draft_file:
-                draft_path = Path(draft_file.name)
-
-            self._parser.save(draft_path, data)
-            self.editor.open(draft_path)
-            edited_data = self._parser.load(draft_path)
-            self._flatten_mapping(edited_data)
-            draft_path.replace(edit_path)
-        finally:
-            if draft_path is not None and draft_path.exists():
-                draft_path.unlink()
-
-        self.load()
+        self.editor.open(edit_path)
+        if edit_path.exists():
+            self.load()
+        else:
+            self._initialize_entries()
         return self
 
     
@@ -562,7 +593,7 @@ class Confease:
         Python value.
         """
         if self._entries is None:
-            self.reset()
+            self._initialize_entries()
         entries = self._entries or []
         for key in {entry.key for entry in entries}:
             if key in os.environ:

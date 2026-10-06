@@ -119,7 +119,7 @@ def test_load_sources_applies_default_precedence_across_all_origins(tmp_path, mo
 def test_reload_files_raises_when_source_keys_collide_with_existing_sections(tmp_path):
     path = tmp_path / "conf.yaml"
     path.write_text("database: sqlite\n")
-    conf = Confease(**{"database": {"host": "localhost"}})
+    conf = Confease(database={"host": "localhost"})
 
     with pytest.raises(ValueError, match="collides"):
         conf.reload_files(path)

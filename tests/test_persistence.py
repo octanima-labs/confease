@@ -4,6 +4,41 @@ import yaml
 from confease import CLI, DEF, USR, Confease, Confitem, Csv, Ini, Json, Toml, Xml
 
 
+@pytest.mark.parametrize("content", [
+    "- invalid\n",
+    "KEY: [\n",
+    "database:\n  host:\n    nested: invalid\n",
+    "database: scalar\ndatabase.host: collision\n",
+])
+def test_failed_load_preserves_previous_entries(tmp_path, content):
+    path = tmp_path / "conf.yaml"
+    path.write_text("KEY: original\n")
+    conf = Confease(path, DEFAULT="fallback")
+    conf.set("UNSAVED", 42)
+    previous = list(conf._entries)
+    path.write_text(content)
+
+    with pytest.raises((ValueError, yaml.YAMLError)):
+        conf.load()
+
+    assert conf._entries == previous
+    assert conf.get("KEY") == "original"
+    assert conf.get("UNSAVED") == 42
+
+
+def test_failed_load_with_default_collision_preserves_entries(tmp_path):
+    path = tmp_path / "conf.yaml"
+    conf = Confease(path, database={"host": "default"})
+    conf.set("KEY", "original")
+    previous = list(conf._entries)
+    path.write_text("database: scalar\n")
+
+    with pytest.raises(ValueError, match="collides"):
+        conf.load()
+
+    assert conf._entries == previous
+
+
 def test_existing_yaml_file_loads_on_init_with_defaults(tmp_path):
     path = tmp_path / "conf.yaml"
     path.write_text("APP_DIR: /tmp/app\nNUMBER: 3\n")
@@ -59,7 +94,7 @@ def test_save_can_write_entries_from_all_origins(tmp_path):
 
 def test_save_can_write_nested_entries_from_all_origins(tmp_path):
     path = tmp_path / "conf.yaml"
-    conf = Confease(path, **{"database": {"host": "default"}})
+    conf = Confease(path, database={"host": "default"})
 
     conf.set("database.port", 5432)
     conf.save(user_only=False)

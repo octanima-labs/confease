@@ -1,3 +1,4 @@
+from confease.editors import TextEditor
 from confease.model import (
     CLI,
     DEF,
@@ -8,7 +9,6 @@ from confease.model import (
     Confease,
     Confitem,
 )
-from confease.editors import TextEditor
 from confease.parsers import (
     CFG,
     CONF,
@@ -43,10 +43,9 @@ __all__ = [
     "INI",
     "JSON",
     "ORIGINS",
-    "PARSER_CLASSES",
     "PARSERS",
+    "PARSER_CLASSES",
     "SYS",
-    "TextEditor",
     "TOML",
     "USR",
     "XML",
@@ -59,6 +58,7 @@ __all__ = [
     "Ini",
     "Json",
     "Parser",
+    "TextEditor",
     "Toml",
     "Xml",
     "Yaml",

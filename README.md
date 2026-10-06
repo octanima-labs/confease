@@ -101,7 +101,7 @@ Origins mean:
 - `ENV`: known environment variables loaded by `reload_env()`.
 - `SYS`: config files outside the current user home directory.
 - `USR`: config files inside the current user home directory and values assigned with `set()`.
-- `DEF`: defaults passed as keyword arguments to `Confease(...)`.
+- `DEF`: keyword defaults or values read from a configured template.
 
 Customize precedence with `preference`:
 
@@ -153,16 +153,32 @@ YAML, JSON, TOML, INI, and XML persist one-level nested sections. CSV persists f
 
 ## Edit Config Files
 
-`edit_file()` opens a temporary draft in a blocking text editor, validates the edited content with the active parser, and only then replaces the real config file:
+`edit_file()` opens the real configured path in a blocking text editor without serializing it first, preserving comments and formatting:
 
 ```python
 from confease import TextEditor
 
 conf.editor = TextEditor("code")
-conf.edit_file(user_only=True)
+conf.edit_file()
 ```
 
-Invalid edited content raises an error and leaves the previous file and in-memory values unchanged.
+Save manually in the editor. A missing file stays missing if you close without saving; parent directories are created as needed. Valid saved content is reloaded. Invalid saved content raises an error and remains on disk, while the previous in-memory entries stay intact.
+
+**Upgrading:** Replace `edit_file(user_only=...)` with `edit_file()`. The removed argument no longer applies because editing opens the actual file rather than generating filtered content. `save(user_only=...)` is unchanged.
+
+## Templates And Reset
+
+Use a template instead of keyword defaults when defaults belong in a file:
+
+```python
+conf = Confease("conf.yaml", template="defaults.yaml")  # defaults.yaml must exist
+conf.get("DEBUG")  # falls back to the template if absent from conf.yaml
+conf.reset()       # explicitly overwrites conf.yaml with exact template content
+```
+
+Template values are `DEF` defaults in memory; initialization and reads do not copy them to the target. Explicit template-backed `reset()` validates the template, restores its exact bytes (including comments), and reloads the target as `USR` values. Missing or invalid templates leave the existing file and entries unchanged. Without a template, `reset()` resets keyword defaults only in memory.
+
+See [configuration guidance](docs/configuration.md) for details.
 
 ## Documentation
 

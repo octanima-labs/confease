@@ -102,7 +102,7 @@ def test_set_force_updates_even_when_user_origin_is_lower_priority():
 
 
 def test_nested_defaults_support_dotted_and_section_access():
-    conf = Confease(**{"database": {"host": "localhost", "port": 5432}})
+    conf = Confease(database={"host": "localhost", "port": 5432})
 
     assert conf.get("database.host") == "localhost"
     assert conf.get("database.port") == 5432
@@ -155,7 +155,7 @@ def test_indexed_assignment_supports_nested_dict_values():
 
 
 def test_indexed_access_supports_dotted_and_section_reads():
-    conf = Confease(**{"database": {"host": "localhost", "port": 5432}})
+    conf = Confease(database={"host": "localhost", "port": 5432})
 
     assert conf["database.host"] == "localhost"
     assert conf["database"] == {"host": "localhost", "port": 5432}
@@ -163,7 +163,7 @@ def test_indexed_access_supports_dotted_and_section_reads():
 
 
 def test_indexed_section_reads_return_plain_dicts_with_key_errors():
-    conf = Confease(**{"database": {"host": "localhost"}})
+    conf = Confease(database={"host": "localhost"})
 
     with pytest.raises(KeyError):
         conf["database"]["missing"]

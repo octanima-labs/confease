@@ -7,6 +7,18 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking:** Remove `user_only` from `Confease.edit_file()`; migrate calls to `edit_file()`. Editing now opens the real configured path without serialization, preserving comments and formatting.
+- **Breaking:** Invalid manually saved edits now remain on disk and raise validation errors while preserving previous in-memory entries, rather than restoring the old file.
+- Leave missing files absent until the editor saves them; `TextEditor.open()` no longer pre-creates its target.
+
+### Fixed
+
+- Load configured templates as memory-only default-origin values and separate lazy initialization from explicit reset.
+- Complete template-backed `reset()` with validated exact-content restoration, preserving template comments and formatting.
+- Validate complete configuration content before replacing in-memory entries, preserving prior state when loading fails.
+
 ## [1.0.0] - 2026-08-13
 
 ### Added

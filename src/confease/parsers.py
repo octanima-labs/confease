@@ -1,15 +1,14 @@
-from collections.abc import Mapping
 import configparser
 import csv
 import json
-from pathlib import Path
-from typing import Any
 import tomllib
 import xml.etree.ElementTree as ET
+from collections.abc import Mapping
+from pathlib import Path
+from typing import Any
 
 import tomli_w
 import yaml
-
 
 YAML = '.yaml'
 YML = '.yml'
@@ -39,9 +38,7 @@ PARSERS = [
 def _dump_value(value: Any) -> str:
     """Serialize a scalar value as compact YAML text for flat formats."""
     dumped = yaml.safe_dump(value, default_flow_style=True).strip()
-    if dumped.endswith("\n..."):
-        dumped = dumped[:-4]
-    return dumped
+    return dumped.removesuffix("\n...")
 
 
 def _load_value(value: str) -> Any:
@@ -118,7 +115,7 @@ class Yaml(Parser):
         if data is None:
             return {}
         if not isinstance(data, dict):
-            raise ValueError(f"Configuration file must contain a key-value mapping: {load_path}")
+            raise ValueError(f"Configuration file must contain a key-value mapping: {load_path}")  # noqa: TRY004 - invalid document shape is a value error
         return {str(key): value for key, value in data.items()}
 
 class Json(Parser):
@@ -149,7 +146,7 @@ class Json(Parser):
             data = json.load(file)
 
         if not isinstance(data, dict):
-            raise ValueError(f"Configuration file must contain a key-value mapping: {load_path}")
+            raise ValueError(f"Configuration file must contain a key-value mapping: {load_path}")  # noqa: TRY004 - invalid document shape is a value error
         return {str(key): value for key, value in data.items()}
 
 class Toml(Parser):
@@ -186,7 +183,7 @@ class Ini(Parser):
     def _new_config() -> configparser.ConfigParser:
         """Create a case-preserving ConfigParser without interpolation."""
         config = configparser.ConfigParser(interpolation=None)
-        setattr(config, "optionxform", str)
+        setattr(config, "optionxform", str)  # noqa: B010 - ConfigParser supports this hook; direct method assignment fails type checking
         return config
 
     @staticmethod
@@ -203,7 +200,7 @@ class Ini(Parser):
                 config[key] = {}
                 for raw_subkey, subvalue in value.items():
                     if isinstance(subvalue, Mapping):
-                        raise ValueError(f"INI configuration keys support one nested level only: {key}.{raw_subkey}")
+                        raise ValueError(f"INI configuration keys support one nested level only: {key}.{raw_subkey}")  # noqa: TRY004 - invalid config shape is a value error
                     config[key][str(raw_subkey)] = _dump_value(subvalue)
             else:
                 config["DEFAULT"][key] = _dump_value(value)
@@ -220,7 +217,7 @@ class Ini(Parser):
             config.read_file(file)
 
         data: dict[str, Any] = {key: _load_value(value) for key, value in config.defaults().items()}
-        sections: dict[str, dict[str, str]] = getattr(config, "_sections")
+        sections: dict[str, dict[str, str]] = getattr(config, "_sections")  # noqa: B009 - private attribute is absent from ConfigParser type stubs
         for section in config.sections():
             section_items = {
                 key: _load_value(value)
@@ -259,7 +256,7 @@ class Xml(Parser):
                 section = ET.SubElement(root, "section", {"name": key})
                 for raw_subkey, subvalue in value.items():
                     if isinstance(subvalue, Mapping):
-                        raise ValueError(f"XML configuration keys support one nested level only: {key}.{raw_subkey}")
+                        raise ValueError(f"XML configuration keys support one nested level only: {key}.{raw_subkey}")  # noqa: TRY004 - invalid config shape is a value error
                     Xml._append_entry(section, str(raw_subkey), subvalue)
             else:
                 Xml._append_entry(root, key, value)
@@ -376,7 +373,7 @@ class Csv(Parser):
             if isinstance(value, Mapping):
                 for raw_subkey, subvalue in value.items():
                     if isinstance(subvalue, Mapping):
-                        raise ValueError(f"CSV configuration keys support one nested level only: {key}.{raw_subkey}")
+                        raise ValueError(f"CSV configuration keys support one nested level only: {key}.{raw_subkey}")  # noqa: TRY004 - invalid config shape is a value error
                     flat[f"{key}.{raw_subkey}"] = subvalue
             else:
                 flat[key] = value
