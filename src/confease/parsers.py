@@ -7,7 +7,6 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-import tomli_w
 import yaml
 
 YAML = '.yaml'
@@ -44,6 +43,14 @@ def _dump_value(value: Any) -> str:
 def _load_value(value: str) -> Any:
     """Parse YAML scalar text back into a Python value."""
     return yaml.safe_load(value)
+
+
+def _save_document(parser: type["Parser"], path: str | Path, data: Mapping[str, Any]):
+    """Use a fresh document baseline and validated replacement for writes."""
+    from confease.documents import save_document
+
+    save_document(parser, path, data)
+
 
 class Parser:
     """Base parser interface for file-format implementations.
@@ -85,9 +92,10 @@ class Parser:
             NotImplementedError: Always raised by the base class.
         """
         raise NotImplementedError("This parser is not implemented for loading yet")
-    
+
+
 class Yaml(Parser):
-    """YAML parser using PyYAML.
+    """YAML semantic loader with comment-preserving round-trip writes.
 
     YAML files must contain a top-level mapping. Empty files load as an empty
     mapping.
@@ -97,9 +105,8 @@ class Yaml(Parser):
 
     @staticmethod
     def save(path: str | Path, data: Mapping[str, Any], **kwargs):
-        """Write mapping data as YAML."""
-        with Path(path).expanduser().open("w") as file:
-            yaml.safe_dump(dict(data), file, sort_keys=True)
+        """Write validated YAML while preserving existing comments."""
+        _save_document(Yaml, path, data)
 
     @staticmethod
     def load(path: str | Path, **kwargs) -> dict[str, Any]:
@@ -118,6 +125,7 @@ class Yaml(Parser):
             raise ValueError(f"Configuration file must contain a key-value mapping: {load_path}")  # noqa: TRY004 - invalid document shape is a value error
         return {str(key): value for key, value in data.items()}
 
+
 class Json(Parser):
     """JSON parser using the Python standard library.
 
@@ -129,10 +137,8 @@ class Json(Parser):
 
     @staticmethod
     def save(path: str | Path, data: Mapping[str, Any], **kwargs):
-        """Write mapping data as formatted JSON."""
-        with Path(path).expanduser().open("w") as file:
-            json.dump(dict(data), file, indent=2, sort_keys=True)
-            file.write("\n")
+        """Replace the file with complete validated JSON."""
+        _save_document(Json, path, data)
 
     @staticmethod
     def load(path: str | Path, **kwargs) -> dict[str, Any]:
@@ -149,8 +155,9 @@ class Json(Parser):
             raise ValueError(f"Configuration file must contain a key-value mapping: {load_path}")  # noqa: TRY004 - invalid document shape is a value error
         return {str(key): value for key, value in data.items()}
 
+
 class Toml(Parser):
-    """TOML parser using ``tomllib`` and ``tomli-w``.
+    """TOML semantic loader with ``tomlkit`` round-trip writes.
 
     TOML naturally supports one-level sections as tables.
     """
@@ -159,14 +166,15 @@ class Toml(Parser):
 
     @staticmethod
     def save(path: str | Path, data: Mapping[str, Any], **kwargs):
-        """Write mapping data as TOML."""
-        Path(path).expanduser().write_text(tomli_w.dumps(dict(data)))
+        """Write validated TOML while preserving existing comments."""
+        _save_document(Toml, path, data)
 
     @staticmethod
     def load(path: str | Path, **kwargs) -> dict[str, Any]:
         """Read TOML mapping data."""
         with Path(path).expanduser().open("rb") as file:
             return tomllib.load(file)
+
 
 class Ini(Parser):
     """INI-family parser using ConfigParser sections for one-level nesting.
@@ -193,20 +201,7 @@ class Ini(Parser):
         Raises:
             ValueError: If nested mappings exceed one level.
         """
-        config = Ini._new_config()
-        for raw_key, value in data.items():
-            key = str(raw_key)
-            if isinstance(value, Mapping):
-                config[key] = {}
-                for raw_subkey, subvalue in value.items():
-                    if isinstance(subvalue, Mapping):
-                        raise ValueError(f"INI configuration keys support one nested level only: {key}.{raw_subkey}")  # noqa: TRY004 - invalid config shape is a value error
-                    config[key][str(raw_subkey)] = _dump_value(subvalue)
-            else:
-                config["DEFAULT"][key] = _dump_value(value)
-
-        with Path(path).expanduser().open("w") as file:
-            config.write(file)
+        _save_document(Ini, path, data)
 
     @staticmethod
     def load(path: str | Path, **kwargs) -> dict[str, Any]:
@@ -233,6 +228,7 @@ class Cfg(Ini):
 
     extensions: tuple[str, ...] = ()
 
+
 class Xml(Parser):
     """XML parser using ``entry`` leaves and one-level ``section`` elements.
 
@@ -249,21 +245,7 @@ class Xml(Parser):
         Raises:
             ValueError: If nested mappings exceed one level.
         """
-        root = ET.Element("config")
-        for raw_key, value in data.items():
-            key = str(raw_key)
-            if isinstance(value, Mapping):
-                section = ET.SubElement(root, "section", {"name": key})
-                for raw_subkey, subvalue in value.items():
-                    if isinstance(subvalue, Mapping):
-                        raise ValueError(f"XML configuration keys support one nested level only: {key}.{raw_subkey}")  # noqa: TRY004 - invalid config shape is a value error
-                    Xml._append_entry(section, str(raw_subkey), subvalue)
-            else:
-                Xml._append_entry(root, key, value)
-
-        tree = ET.ElementTree(root)
-        ET.indent(tree, space="  ")
-        tree.write(Path(path).expanduser(), encoding="unicode", xml_declaration=True)
+        _save_document(Xml, path, data)
 
     @staticmethod
     def load(path: str | Path, **kwargs) -> dict[str, Any]:
@@ -320,6 +302,7 @@ class Xml(Parser):
             raise ValueError(f"XML entry elements cannot contain child elements: {key}")
         return key, yaml.safe_load(element.text or "")
 
+
 class Csv(Parser):
     """CSV parser with a ``key,value`` header and flat dotted keys.
 
@@ -337,12 +320,7 @@ class Csv(Parser):
         Raises:
             ValueError: If nested mappings exceed one level.
         """
-        save_path = Path(path).expanduser()
-        with save_path.open("w", newline="") as file:
-            writer = csv.DictWriter(file, fieldnames=["key", "value"])
-            writer.writeheader()
-            for key, value in Csv._flatten(data).items():
-                writer.writerow({"key": key, "value": _dump_value(value)})
+        _save_document(Csv, path, data)
 
     @staticmethod
     def load(path: str | Path, **kwargs) -> dict[str, Any]:

@@ -334,9 +334,7 @@ class Confease:
     
     def _data_for_save(self, user_only: bool = True) -> dict[str, Any]:
         """Return nested mapping data for persistence."""
-        if self._entries is None:
-            self._initialize_entries()
-        entries = self._entries or []
+        entries = self._defaults if self._entries is None else self._entries
         return self._nest_mapping(
             {entry.key: entry.value for entry in entries if not user_only or entry.origin == USR}
         )
@@ -351,7 +349,11 @@ class Confease:
 
         Notes:
             Runtime-only configurations created without ``path`` are a no-op
-            when saved.
+            when saved. Existing YAML, TOML, INI-family, and XML comments are
+            preserved using the latest destination document. Selected in-memory
+            values are authoritative; external values are not merged. Invalid
+            destinations or unrepresentable values raise without replacing the
+            file. Complete candidates are validated before replacement.
         """
         if self._path is None:
             return
@@ -474,6 +476,36 @@ class Confease:
             self._set_item(item_key, item_value, USR, force=True)
         if self._reload:
             self.save()
+
+    def delete(self, key: str) -> bool:
+        """Remove an effective leaf or all leaves in a one-level section.
+
+        Returns true when at least one entry was removed, including null-valued
+        entries, and false for a missing key. With ``reload=True``, read the
+        current file first and persist through comment-preserving ``save()``.
+        A failed automatic save restores the entries before deletion.
+
+        Deletion does not create a defaults tombstone: a later load or reset
+        can supply a deleted default again. Invalid key shapes raise ValueError.
+        """
+        self._validate_key(key)
+        if self._entries is None:
+            self._initialize_entries()
+        elif self._reload:
+            self.load()
+        previous = self._entries or []
+        remaining = [entry for entry in previous
+                     if entry.key != key and not entry.key.startswith(f"{key}.")]
+        if len(remaining) == len(previous):
+            return False
+        self._entries = remaining
+        try:
+            if self._reload:
+                self.save()
+        except Exception:
+            self._entries = previous
+            raise
+        return True
 
     def __getitem__(self, key: str):
         """Return ``get(key)`` so missing keys produce ``None``."""

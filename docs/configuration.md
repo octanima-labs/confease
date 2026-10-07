@@ -128,7 +128,65 @@ conf.save()
 
 If the instance was created without a path, `save()` is a no-op.
 
-`save()` serializes values and does not preserve source comments. Use direct editing when users need to maintain the original file text. Failed `load()` validation leaves previous in-memory entries intact.
+`save()` preserves destination comments in YAML, TOML, INI-family, and XML files.
+YAML and TOML use native round-trip documents; INI uses an `iniparse` presentation
+tree with the existing stdlib/YAML value semantics; XML keeps comment nodes inside
+the root and in the document prolog and epilog. JSON and CSV retain their existing
+formats without introducing comment conventions.
+
+Saving reads and validates the current destination document, so comment edits
+made externally after loading are retained. The selected in-memory values remain
+authoritative: externally added or changed values are not implicitly merged.
+Values excluded by user-only origin filtering are removed from the destination
+together with their attached comments. Document headers and footers survive.
+Unaffected ordering and presentation are retained where the backend supports it;
+structured writes do not promise byte-identical formatting.
+
+Complete candidate files are serialized, reloaded, and checked for supported
+structure and faithful value representation before replacement. Invalid existing
+destinations, serialization errors, or replacement failures leave the existing
+file intact. Failed `load()` validation also leaves previous in-memory entries
+intact. General concurrent-writer merging and locking are not provided.
+
+### Deleting Values
+
+```python
+conf.delete("database.host")  # remove a leaf
+conf.delete("database")       # remove all leaves in a section
+conf.save()
+```
+
+`delete()` returns true when it removes at least one effective entry, including
+entries with null values; it returns false for missing keys. With `reload=True`,
+it reads the current file and saves through the validated comment-preserving
+path. Failed automatic saves restore the entries before deletion. A deleted
+default can reappear after a later load or reset; deletion does not create a
+defaults tombstone.
+
+Deleting a key removes its inline and clearly attached leading comments.
+Deleting a section also removes descendant annotations. Document boundary
+comments take priority over first/last-key ownership and are preserved.
+
+### CLI Creation And Repair
+
+```bash
+confease init settings.yaml -i debug=true -i database.host=localhost
+confease edit settings.yaml
+confease settings.yaml -u debug=false -d database.host
+```
+
+`init` requires a missing destination; `edit` requires an existing one. `-f FMT`
+overrides suffix inference without changing the path. Extensionless initialization
+defaults to YAML; unknown suffixes and extensionless edits require a format.
+Initial items and updates use YAML-typed `KEY=VALUE` arguments in every format;
+retain value quotes with shell quoting, for example `-u 'label="true"'`.
+
+Interactive CLI editing opens a draft even when the original file is invalid.
+Validation failures report errors and reopen that same draft for correction.
+Successful editor exit accepts valid content, which is installed as exact draft
+bytes. Ctrl-C or editor failure cancels installation. Scripted updates and
+deletions operate as one validated batch and require a valid source document.
+Application-specific rules are not validated without an application schema.
 
 ## Editing Files Manually
 
