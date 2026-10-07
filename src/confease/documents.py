@@ -604,8 +604,11 @@ def render_document(parser: type[Parser], source: str, values: Mapping[str, Any]
     return adapter(source, values).render(desired)
 
 
-def install_draft(draft: Path, target: Path, *, create_only: bool = False):
-    """Install complete bytes; initialization never overwrites a raced target."""
+def install_draft(draft: Path, target: Path, *, create_only: bool = False, backup: bool = False):
+    """Install validated bytes, optionally snapshotting before replacement.
+
+    Initialization never overwrites a raced target or needs a backup.
+    """
     if target.exists():
         draft.chmod(stat.S_IMODE(target.stat().st_mode))
     if create_only:
@@ -613,10 +616,14 @@ def install_draft(draft: Path, target: Path, *, create_only: bool = False):
         os.link(draft, target)
         draft.unlink()
     else:
+        if backup:
+            from confease.backups import create_backup
+
+            create_backup(target)
         draft.replace(target)
 
 
-def save_document(parser: type[Parser], path: str | Path, data: Mapping[str, Any]):
+def save_document(parser: type[Parser], path: str | Path, data: Mapping[str, Any], *, backup: bool = False):
     """Validate, reconcile the latest document, and replace it atomically."""
     target = Path(path).expanduser()
     desired = normalized(data)
@@ -634,7 +641,7 @@ def save_document(parser: type[Parser], path: str | Path, data: Mapping[str, Any
         actual = normalized(parser.load(draft))
         if not equivalent(actual, desired):
             raise ValueError(f"Values cannot be faithfully represented by {parser.__name__}")
-        install_draft(draft, target)
+        install_draft(draft, target, backup=backup)
     finally:
         if draft is not None:
             draft.unlink(missing_ok=True)

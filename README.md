@@ -28,7 +28,7 @@ The package requires Python 3.11 or newer.
 
 ### Command line
 
-The installed `confease` command creates and edits configuration files:
+The installed `confease` command creates, edits, and restores configuration files:
 
 ```bash
 # Open a new, preloaded draft in your default editor
@@ -41,6 +41,17 @@ confease settings.yaml                 # shorthand for edit
 # Apply a validated batch without opening an editor
 confease settings.yaml -u database.host=localhost -u retries=3
 confease edit settings.yaml -d obsolete -d database.port
+
+# Keep the original before an interactive or scripted edit
+confease edit settings.yaml -b
+confease settings.yaml --backup -u retries=5
+
+# Restore the latest matching backup, or choose a source explicitly
+confease restore settings.yaml
+confease restore settings.yaml --from settings-20261007-143052.yaml.bkp
+
+# Back up the current version too, so another restore can undo this restore
+confease restore settings.yaml -b
 ```
 
 `-i/--item`, `-u/--update`, and `-d/--delete` are repeatable. Updates add or replace
@@ -52,7 +63,7 @@ child can convert it into a section.
 
 `init` refuses existing destinations, and `edit` requires an existing file. Format
 selection uses `-f/--format` first, then a recognized suffix. Extensionless `init`
-defaults to YAML; extensionless `edit` and unknown suffixes require an override:
+defaults to YAML; extensionless `edit`/`restore` and unknown suffixes require an override:
 
 ```bash
 confease init settings -f toml -i debug=true
@@ -61,7 +72,7 @@ confease edit settings -f toml -u debug=false
 
 Supported format names are `yaml`, `yml`, `json`, `toml`, `ini`, `cfg`, `conf`,
 `config`, `xml`, and `csv`. A format override keeps the path unchanged; INI-family
-suffixes use INI syntax. Use `./init` or `./edit` to disambiguate files named after
+suffixes use INI syntax. Use `./init`, `./edit`, or `./restore` to disambiguate files named after
 commands, and `--` before paths starting with a dash.
 
 Values use YAML syntax regardless of the file format:
@@ -143,6 +154,83 @@ then applies the selected in-memory values. External values are not implicitly
 merged. Invalid destinations or unrepresentable output cause an error without
 replacing the file. JSON has no comment syntax; CSV retains its `key,value` format.
 Concurrent-writer merging and locking are not provided.
+
+## Backups And Restore
+
+Enable backups for an instance or for a single operation:
+
+```python
+conf = Confease("settings.yaml", __backup__=True)
+conf.set("retries", 5)
+conf.save()                       # inherits the instance policy
+conf.save(backup=False)           # skips the snapshot for this save only
+conf.edit_file(backup=True)       # snapshots before opening the real file
+conf.reset(backup=True)           # snapshots when restoring a template to disk
+
+conf.restore()                   # latest matching sibling; inherits backup=True
+conf.restore("older.snapshot", backup=False)  # explicit source, any filename
+```
+
+The constructor's `__backup__` option controls the instance policy; ordinary
+`backup=` remains a configuration default. Backups are disabled by default.
+On `save()`, `edit_file()`, `reset()`, and `restore()`, `backup=None`
+inherits the instance policy; `True` or `False` overrides that operation only.
+With `reload=True, __backup__=True`, every automatic save triggered by `set()`, indexed
+assignment, or a successful `delete()` snapshots the previous file. Memory-only
+operations and first writes to missing files have no previous document to back up.
+
+The policy and a config key named `backup` can coexist:
+
+```python
+conf = Confease("settings.yaml", __backup__=True, backup="daily")
+conf.get("backup")               # "daily" as a default unless the file overrides it
+conf.save(backup=False)           # skips a snapshot; does not change the config key
+```
+
+Snapshots copy exact bytes, preserving original comments, formatting, and even
+malformed content being repaired. They live beside the destination:
+
+```text
+settings-20261007-143052.yaml.bkp
+settings-20261007-143052-001.yaml.bkp   # another snapshot in the same second
+settings-20261007-143052-002.yaml.bkp
+```
+
+The timestamp uses local time in `YYYYMMDD-HHMMSS` form. Increasing collision
+suffixes are padded to at least three digits; existing backups are never
+overwritten. For `settings`, the name is `settings-20261007-143052.bkp`; for
+`app.settings.toml`, it is `app.settings-20261007-143052.toml.bkp`.
+
+Draft-based writes validate first, then back up immediately before replacement.
+Cancelled or invalid CLI drafts create no snapshot. Direct API `edit_file()`
+backs up before launching its editor, so its snapshot remains even if no changes
+are saved. A backup failure aborts replacement or direct editor launch. Complete
+snapshots remain available if subsequent installation fails. Backups are not
+pruned automatically; manage their retention as needed.
+
+Without a source path, `restore()` selects a backup matching the destination's
+exact name and extension, ordered by embedded timestamp and numeric suffix,
+not modification time. With an explicit source it accepts any filename or
+directory. It validates the exact candidate with the active parser, installs
+the bytes without reserialization, retains the source, and reloads restored
+values as user-origin entries with existing default fallbacks. Defaults and the
+configured template do not change. Missing or invalid sources raise an error;
+an invalid latest backup does not silently fall back to an older one.
+
+Restore can create a missing destination or replace malformed content. The CLI
+supports recovery without loading a broken destination first and chooses the
+parser from the destination or `--format`, not from the backup's `.bkp` suffix:
+
+```bash
+confease restore settings --from history.json.bkp -f json -b
+```
+
+With backups enabled, restore selects its source **before** snapshotting the
+current destination. Consecutive latest-backup restores therefore toggle
+between versions, including within the same second. This assumes chronological
+backup timestamps; a clock rollback or future-dated imported backup can change
+which file is latest. Use an explicit source for deterministic recovery in that
+case. Backups do not add locking or concurrent-writer merging.
 
 ## Nested Keys
 

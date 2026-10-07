@@ -15,6 +15,8 @@ from typing import Any
 
 import yaml
 
+from confease.backups import create_backup, latest_backup
+from confease.documents import install_draft
 from confease.editors import TextEditor
 from confease.parsers import PARSER_CLASSES, PARSERS, Parser, Yaml
 
@@ -106,7 +108,7 @@ class Confease:
     saved and loaded as ordinary nested mappings.
     """
 
-    def __init__(self, path: str | Path | None = None, reload: bool = False, parser: type[Parser] | None = Yaml, template: str | Path | None = None, preference = (CLI, ENV, SYS, USR, DEF), **kwargs):
+    def __init__(self, path: str | Path | None = None, reload: bool = False, parser: type[Parser] | None = Yaml, template: str | Path | None = None, preference = (CLI, ENV, SYS, USR, DEF), __backup__: bool = False, **kwargs):
         """Initialize a configuration object.
 
         Args:
@@ -122,6 +124,10 @@ class Confease:
                 restores its exact content to ``path`` and reloads it.
             preference: Origins ordered from highest to lowest priority.
                 Omitted origins are appended after the provided ones.
+            __backup__: Keep an exact sibling snapshot before persisted changes to
+                an existing file. Disabled by default; automatic saves inherit
+                this policy. Individual persistence operations can override it.
+                The ordinary ``backup`` keyword remains a configuration default.
             **kwargs: In-code default configuration values. One-level nested
                 dictionaries are accepted.
 
@@ -136,6 +142,7 @@ class Confease:
         else:
             self._path = Path(path).expanduser()
         self._reload = bool(reload) # if reload, changes are saved instantly and each time conf is accessed, it is readed from file; in this way the conf 'reloads' itself
+        self._backup = bool(__backup__)
         self._defaults: list[Confitem] = [Confitem(k, v, DEF) for k, v in self._flatten_mapping(kwargs).items()]
         self._entries: list[Confitem] | None = None
         self._preference: list[str] | None = None
@@ -339,13 +346,20 @@ class Confease:
             {entry.key: entry.value for entry in entries if not user_only or entry.origin == USR}
         )
 
-    def save(self, user_only: bool = True):
+    def _backup_enabled(self, backup: bool | None) -> bool:
+        """Resolve a per-operation override without changing instance policy."""
+        return self._backup if backup is None else backup
+
+    def save(self, user_only: bool = True, *, backup: bool | None = None):
         """Persist configuration to the instance path.
 
         Args:
             user_only: When true, write only ``USR`` entries. When false, write
                 all effective entries, including defaults and overrides from
                 other origins.
+            backup: ``None`` inherits the instance policy; a boolean overrides
+                it for this save only. After candidate validation, snapshot the
+                previous bytes before replacement. Backup failure aborts saving.
 
         Notes:
             Runtime-only configurations created without ``path`` are a no-op
@@ -360,15 +374,22 @@ class Confease:
 
         self._path.parent.mkdir(parents=True, exist_ok=True)
         data = self._data_for_save(user_only)
-        self._parser.save(self._path, data)
+        if self._backup_enabled(backup):
+            self._parser.save(self._path, data, backup=True)
+        else:
+            self._parser.save(self._path, data)
 
-    def reset(self):
+    def reset(self, *, backup: bool | None = None):
         """Restore keyword defaults in memory, or copy the template to disk.
 
         With a template, explicitly overwrite the configured path with exact
         template bytes and reload them as user-origin values. Validation or
         copy failures leave the previous file and in-memory entries unchanged.
         Without a template, reset only memory and do not write the file.
+
+        Args:
+            backup: Override the instance backup policy for template restoration.
+                ``None`` inherits it. Memory-only reset never creates a backup.
 
         Raises:
             FileNotFoundError: If template restoration lacks a target path or
@@ -396,13 +417,56 @@ class Confease:
             # Validate the exact copied document before installing it.
             values = self._flatten_mapping(self._parser.load(draft_path))
             defaults = [Confitem(key, value, DEF) for key, value in values.items()]
-            draft_path.replace(self._path)
+            install_draft(draft_path, self._path, backup=self._backup_enabled(backup))
         finally:
             if draft_path is not None and draft_path.exists():
                 draft_path.unlink()
 
         self._defaults = defaults
         self.load()
+
+    def restore(self, path: str | Path | None = None, *, backup: bool | None = None):
+        """Restore exact backup bytes while retaining existing defaults.
+
+        Args:
+            path: Explicit source file, irrespective of filename or directory.
+                When omitted, select the latest matching sibling backup by its
+                embedded timestamp and collision sequence, not modification time.
+            backup: Override the instance backup policy for this operation.
+                ``None`` inherits it. Select and validate the source before
+                backing up the destination so a subsequent restore can undo this
+                one. The source backup is retained.
+
+        Raises:
+            FileNotFoundError: If no destination, source, or matching backup exists.
+            ValueError: If source structure or keys conflict with retained defaults.
+            OSError: If copying, backing up, or replacing the destination fails.
+
+        Notes:
+            Validation uses the active parser. Malformed or missing destinations
+            can be recovered; failures preserve the destination and live entries.
+            Defaults, template, configured path, and instance policy are unchanged.
+        """
+        if self._path is None:
+            raise FileNotFoundError("No configuration path provided")
+        source = Path(path).expanduser() if path is not None else latest_backup(self._path)
+        if not source.exists():
+            raise FileNotFoundError(source)
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        draft_path: Path | None = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                suffix=self._path.suffix, prefix=f".{self._path.name}.",
+                dir=self._path.parent, delete=False,
+            ) as draft_file:
+                draft_path = Path(draft_file.name)
+            shutil.copyfile(source, draft_path)
+            entries = self._entries_for_load(self._parser.load(draft_path))
+            install_draft(draft_path, self._path, backup=self._backup_enabled(backup))
+        finally:
+            if draft_path is not None:
+                draft_path.unlink(missing_ok=True)
+        self._entries = entries
 
     def get(self, key: str, default = None, cast = None):
         """Return a value or one-level section by key.
@@ -523,7 +587,7 @@ class Confease:
         """Reserved for a future detailed printable representation."""
         # print the configuration in the console
     
-    def edit_file(self):
+    def edit_file(self, *, backup: bool | None = None):
         """Edit the configured file through a blocking text editor.
 
         Open the real path in ``self.editor`` without serializing or creating
@@ -534,6 +598,11 @@ class Confease:
         content raises an error and remains on disk while the previous
         in-memory entries stay intact. A missing target remains absent if the
         user does not save; only in-memory defaults are initialized.
+
+        Args:
+            backup: ``None`` inherits the instance policy. When enabled, copy
+                the existing file before editor launch, retaining the snapshot
+                even if no changes are saved. Backup failure prevents launch.
 
         Returns:
             The current ``Confease`` instance.
@@ -548,6 +617,8 @@ class Confease:
 
         edit_path = self._path.expanduser()
         edit_path.parent.mkdir(parents=True, exist_ok=True)
+        if self._backup_enabled(backup):
+            create_backup(edit_path)
         self.editor.open(edit_path)
         if edit_path.exists():
             self.load()

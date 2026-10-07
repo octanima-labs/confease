@@ -45,11 +45,11 @@ def _load_value(value: str) -> Any:
     return yaml.safe_load(value)
 
 
-def _save_document(parser: type["Parser"], path: str | Path, data: Mapping[str, Any]):
+def _save_document(parser: type["Parser"], path: str | Path, data: Mapping[str, Any], *, backup: bool = False):
     """Use a fresh document baseline and validated replacement for writes."""
     from confease.documents import save_document
 
-    save_document(parser, path, data)
+    save_document(parser, path, data, backup=backup)
 
 
 class Parser:
@@ -106,7 +106,7 @@ class Yaml(Parser):
     @staticmethod
     def save(path: str | Path, data: Mapping[str, Any], **kwargs):
         """Write validated YAML while preserving existing comments."""
-        _save_document(Yaml, path, data)
+        _save_document(Yaml, path, data, backup=kwargs.get("backup", False))
 
     @staticmethod
     def load(path: str | Path, **kwargs) -> dict[str, Any]:
@@ -138,7 +138,7 @@ class Json(Parser):
     @staticmethod
     def save(path: str | Path, data: Mapping[str, Any], **kwargs):
         """Replace the file with complete validated JSON."""
-        _save_document(Json, path, data)
+        _save_document(Json, path, data, backup=kwargs.get("backup", False))
 
     @staticmethod
     def load(path: str | Path, **kwargs) -> dict[str, Any]:
@@ -167,7 +167,7 @@ class Toml(Parser):
     @staticmethod
     def save(path: str | Path, data: Mapping[str, Any], **kwargs):
         """Write validated TOML while preserving existing comments."""
-        _save_document(Toml, path, data)
+        _save_document(Toml, path, data, backup=kwargs.get("backup", False))
 
     @staticmethod
     def load(path: str | Path, **kwargs) -> dict[str, Any]:
@@ -201,7 +201,7 @@ class Ini(Parser):
         Raises:
             ValueError: If nested mappings exceed one level.
         """
-        _save_document(Ini, path, data)
+        _save_document(Ini, path, data, backup=kwargs.get("backup", False))
 
     @staticmethod
     def load(path: str | Path, **kwargs) -> dict[str, Any]:
@@ -245,7 +245,7 @@ class Xml(Parser):
         Raises:
             ValueError: If nested mappings exceed one level.
         """
-        _save_document(Xml, path, data)
+        _save_document(Xml, path, data, backup=kwargs.get("backup", False))
 
     @staticmethod
     def load(path: str | Path, **kwargs) -> dict[str, Any]:
@@ -320,7 +320,7 @@ class Csv(Parser):
         Raises:
             ValueError: If nested mappings exceed one level.
         """
-        _save_document(Csv, path, data)
+        _save_document(Csv, path, data, backup=kwargs.get("backup", False))
 
     @staticmethod
     def load(path: str | Path, **kwargs) -> dict[str, Any]:
