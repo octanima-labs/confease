@@ -87,16 +87,32 @@ conf["database.host"] = "db.internal"
 
 ## Edit a Config File
 
-Let a user edit only persisted user preferences while keeping defaults in code:
+Let a user edit the actual file while keeping fallback defaults in code:
 
 ```python
 from confease import Confease, TextEditor
 
 conf = Confease("~/.config/my-app/conf.yaml", THEME="light")
-conf.set("THEME", "dark")
 conf.editor = TextEditor("nano")
 
-conf.edit_file(user_only=True)
+conf.edit_file()
 ```
 
-The edit happens in a temporary draft. If the edited file is invalid for the active parser, the original file is kept.
+Save manually in the editor. Existing comments are preserved without serialization. A missing file is not created unless the editor saves it. Valid saves update the configuration object; invalid saves remain on disk and raise an error while preserving previous in-memory entries.
+
+## Restore A Template
+
+Given an existing `defaults.yaml`:
+
+```yaml
+# Default appearance
+THEME: light
+```
+
+```python
+conf = Confease("settings.yaml", template="defaults.yaml")
+conf.get("THEME")  # template fallback if missing from settings.yaml
+conf.reset()       # deliberately replaces settings.yaml, preserving the comment
+```
+
+Reading template defaults does not create `settings.yaml`. Explicit `reset()` validates the template and restores its exact bytes to the target.

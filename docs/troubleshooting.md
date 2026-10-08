@@ -52,7 +52,9 @@ CLI > ENV > SYS > USR > DEF
 
 ## Editing A File Fails
 
-`edit_file()` validates the edited draft with the active parser before replacing the real file. Parser errors mean the previous file was kept. Re-open the file and fix the format-specific issue, such as a non-mapping YAML file, a missing CSV `key,value` header, or invalid XML shape.
+`edit_file()` opens the real file and validates it after the editor exits. If you manually save invalid content, that content remains on disk and the error is reported; the library does not restore the previous file. Previous in-memory entries remain intact. Re-open the file, fix the issue, save, and call `load()` again. Common causes include a non-mapping YAML file, unsupported nesting, a missing CSV `key,value` header, or invalid XML shape. With `reload=True`, reads continue to report the invalid file until it is fixed.
+
+A missing file stays absent when the editor closes without saving. Save manually to create it. If an old call raises `TypeError` for `user_only`, replace `edit_file(user_only=...)` with `edit_file()`; `save(user_only=...)` is still supported.
 
 If no editor opens, configure one explicitly:
 
@@ -61,3 +63,7 @@ from confease import TextEditor
 
 conf.editor = TextEditor("nano")
 ```
+
+## Template Restoration Fails
+
+Template defaults are read without creating the target. Call `reset()` explicitly only when you want to overwrite the target with the exact template content. Check that the template exists, is valid for the configured parser, and uses supported keys. Invalid or missing templates leave previous file content and entries unchanged. A template-backed runtime-only configuration needs a target path before it can restore a file.

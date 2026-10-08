@@ -5,6 +5,10 @@ Core API
 
 The core API is centered on :class:`Confease`, a configuration container that stores :class:`Confitem` values with an origin and resolves conflicts through configurable precedence.
 
+This reference is generated from the source docstrings using Sphinx autodoc.
+See :doc:`../configuration` for manual editing, template defaults, reset
+behavior, and migration from the removed editing ``user_only`` argument.
+
 Origins
 -------
 
@@ -26,7 +30,7 @@ Origins
 
 .. data:: DEF
 
-   Origin name for defaults passed to :class:`Confease`.
+   Origin name for keyword defaults or configured template values.
 
 .. data:: ORIGINS
 
