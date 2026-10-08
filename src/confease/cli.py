@@ -34,8 +34,11 @@ def argument_parser() -> argparse.ArgumentParser:
         command.add_argument("path", type=Path, help="Configuration file path.")
         command.add_argument("-f", "--format", metavar="FMT",
                              help="Override the format: yaml, yml, json, toml, ini, cfg, conf, config, xml, csv.")
-    init.add_argument("-i", "--item", action="append", default=[], metavar="KEY=VALUE",
+    seed = init.add_mutually_exclusive_group()
+    seed.add_argument("-i", "--item", action="append", default=[], metavar="KEY=VALUE",
                       help="Seed the editor draft with a typed value; repeat as needed.")
+    seed.add_argument("--template", type=Path, metavar="PATH",
+                      help="Preload a template; create the target only on save (best-effort outside Vim/Neovim).")
     edit.add_argument("-u", "--update", action="append", default=[], metavar="KEY=VALUE",
                       help="Add or replace a typed value without opening an editor.")
     edit.add_argument("-d", "--delete", action="append", default=[], metavar="KEY",
@@ -150,15 +153,21 @@ def main(argv: Sequence[str] | None = None) -> int:
             conf.restore(options.source, backup=options.backup)
         elif not initializing and (options.update or options.delete):
             scripted_edit(path, parser, options.update, options.delete, backup=options.backup)
+        elif initializing and options.template is not None:
+            Confease(path, parser=parser).edit_file(template=options.template)
         else:
             interactive_edit(path, parser, initializing=initializing,
                              items=options.item if initializing else (),
                              backup=False if initializing else options.backup)
-    except KeyboardInterrupt:
-        print("Cancelled; no draft installed.", file=sys.stderr)
+    except KeyboardInterrupt as error:
+        print("Cancelled.", file=sys.stderr)
+        for note in getattr(error, "__notes__", ()):
+            print(note, file=sys.stderr)
         return 130
     except Exception as error:  # noqa: BLE001 - CLI boundary reports backend/editor failures without tracebacks
         print(f"Error: {error}", file=sys.stderr)
+        for note in getattr(error, "__notes__", ()):
+            print(note, file=sys.stderr)
         return 1
     return 0
 

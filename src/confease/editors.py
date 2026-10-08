@@ -13,7 +13,7 @@ __all__ = [
 ]
 
 
-TERMINAL_EDITORS = [["sensible-editor"], ["editor"], ["nano"], ["vim"], ["vi"]]
+TERMINAL_EDITORS = [["nano"], ["vim"], ["nvim"], ["vi"]]
 VISUAL_WAIT_FLAGS = {
     "code": "--wait",
     "code-insiders": "--wait",
@@ -134,14 +134,41 @@ class TextEditor:
         """
         if path is None:
             raise ValueError("Path not provided")
+        abs_path = Path(path).expanduser()
+        self._run([*self._editor_command(), str(abs_path)])
+        return str(abs_path)
+
+    @staticmethod
+    def _run(command: list[str]):
+        """Run a blocking editor command with the launcher's usual errors."""
         try:
-            abs_path = Path(path).expanduser()
-            subprocess.run([*self._editor_command(), str(abs_path)], check=True)
-            return str(abs_path)
+            subprocess.run(command, check=True)
         except OSError as error:
             raise Exception(f"could not open text editor: {error}") from error  # noqa: TRY002 - preserve launcher error API
         except subprocess.CalledProcessError as error:
             raise Exception(f"text editor process failed: {error}") from error  # noqa: TRY002 - preserve launcher error API
+
+    def _open_preloaded(self, path: Path, template: Path) -> bool:
+        """Use native unsaved-buffer insertion, or return false for draft fallback.
+
+        Only explicit Vim/Neovim executables are recognized; ``vi`` and custom
+        commands use the fallback. Successful native launch returns true even
+        when the user abandons the buffer. The caller checks the target itself.
+        """
+        command = self._editor_command()
+        if Path(command[0]).name.lower() not in {"vim", "vim.exe", "nvim", "nvim.exe"}:
+            return False
+        # Vim single-quoted literals escape apostrophes by doubling them. Split
+        # line breaks into expressions so paths cannot inject Ex commands.
+        source = "'" + str(template.absolute()).replace("'", "''").replace(
+            "\n", "' . nr2char(10) . '").replace("\r", "' . nr2char(13) . '") + "'"
+        preload = (
+            "if empty(getftype(expand('%:p'))) | "
+            f"execute 'silent 0read ' . fnameescape({source}) | "
+            "setlocal modified | call cursor(1, 1) | endif"
+        )
+        self._run([*command, "-c", preload, "--", str(path.absolute())])
+        return True
 
     def read(self):
         """Open a temporary file and return its contents after editing.

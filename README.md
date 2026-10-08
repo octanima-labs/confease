@@ -34,6 +34,9 @@ The installed `confease` command creates, edits, and restores configuration file
 # Open a new, preloaded draft in your default editor
 confease init settings.yaml -i debug=true -i database.port=5432
 
+# Preload an exact template; leave the target absent if you abandon the edit
+confease init settings.yaml --template defaults.yaml
+
 # Edit or repair an existing file interactively
 confease edit settings.yaml
 confease settings.yaml                 # shorthand for edit
@@ -60,6 +63,16 @@ entire section. Missing keys produce warnings and the batch continues. Supplying
 any update or deletion selects noninteractive editing. A batch cannot update a
 deleted leaf or a child of a deleted section, but deleting a scalar and adding a
 child can convert it into a section.
+
+`init --template PATH` is mutually exclusive with `--item`. It uses the library's
+[template preloading workflow](#preload-a-missing-file): Vim/Neovim insert into an
+unsaved target buffer; other editors open a seeded draft with best-effort save
+detection. Abandonment leaves the target absent. Template syntax uses the format
+selected from the destination or `--format`, regardless of the template's suffix.
+Saved fallback drafts are validated before installation, and failures print the
+retained draft's recovery path. Native invalid saves remain at the target and are
+reported as errors. Unlike ordinary interactive `init`/`edit`, template init does
+not reopen invalid saves automatically.
 
 `init` refuses existing destinations, and `edit` requires an existing file. Format
 selection uses `-f/--format` first, then a recognized suffix. Extensionless `init`
@@ -88,11 +101,12 @@ quotes and becomes a string. YAML also interprets tokens such as `yes` as boolea
 Assignments split at the first `=`. Invalid keys and values that the destination
 cannot represent (such as TOML `null`) are rejected before replacement.
 
-Interactive editing uses a draft. Invalid saved drafts print errors and reopen
+Ordinary interactive `init` (without `--template`) and `edit` use a draft.
+Invalid saved drafts print errors and reopen
 with your edits intact; a valid draft is installed as exact bytes, preserving
 comments and formatting. This also lets you repair a file that is already invalid.
 Successful editor exit accepts the current valid draft, including an unchanged
-seeded `init` draft. Interrupt the session with Ctrl-C to cancel installation.
+seeded `init --item` draft. Interrupt the session with Ctrl-C to cancel installation.
 Editor failure leaves the destination unchanged. The editor resolver uses
 `EDITOR`, then `VISUAL`, then available fallback editors, with wait flags for
 known graphical editors.
@@ -346,6 +360,46 @@ Save manually in the editor. A missing file stays missing if you close without s
 The installed CLI uses the retained-draft repair loop described above. The
 library's direct-file `edit_file()` API keeps explicit save control and reports
 invalid saves without reverting their text.
+
+### Preload a missing file
+
+Pass an edit-only template to show its contents automatically when the target
+does not exist:
+
+```python
+conf = Confease("settings.yaml")
+conf.editor = TextEditor("vim")
+conf.edit_file(template="defaults.yaml")
+```
+
+The template is validated with the active parser before launch. Existing targets
+open normally and ignore the template argument. This argument does not change the
+instance's configured defaults or constructor template; to use the same file for
+both, pass it explicitly to both the constructor and `edit_file()`.
+
+| Editor command | Missing-target preloading |
+| --- | --- |
+| `vim`, `nvim` (including `.exe` names) | Insert into a modified, unsaved buffer named for the real target. |
+| Nano, `vi`, VS Code/VSCodium, Sublime Text, Notepad variants, custom commands | Open a temporary draft beside the target, seeded with exact template bytes. |
+
+Native Vim/Neovim preloading leaves the target absent until the editor saves it,
+including when saving the unchanged template. Normal editor settings still apply,
+including any configured automatic saving. Native invalid saves remain at the
+target, with previous in-memory entries preserved.
+
+For other editors, draft writes are detected through file identity, timestamps,
+size, and content. A detected save is validated and installed as exact bytes,
+preserving comments and formatting. This is **best-effort**: if the editor skips
+writing unchanged text, saving the unchanged template cannot be distinguished
+from abandonment. The editor displays the draft filename rather than the final
+target; use its ordinary Save operation. Saving under another name is not tracked.
+
+Abandonment leaves the target absent and retains current memory. Successful draft
+installation reloads values with existing defaults. Installation refuses to
+overwrite a target created during editing. Written drafts are retained on
+validation, editor, or installation failure; the raised exception's notes identify
+the recovery path. Unwritten drafts are cleaned up. First creation has no previous
+file to back up, even with `backup=True`.
 
 **Upgrading:** Replace `edit_file(user_only=...)` with `edit_file()`. The removed argument no longer applies because editing opens the actual file rather than generating filtered content. `save(user_only=...)` is unchanged.
 
