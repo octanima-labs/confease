@@ -7,7 +7,7 @@ from confease import CLI, DEF, USR, Confease, Confitem, Csv, Ini, Json, Toml, Xm
 @pytest.mark.parametrize("content", [
     "- invalid\n",
     "KEY: [\n",
-    "database:\n  host:\n    nested: invalid\n",
+    "database:\n  host: scalar\n  host.nested: collision\n",
     "database: scalar\ndatabase.host: collision\n",
 ])
 def test_failed_load_preserves_previous_entries(tmp_path, content):
@@ -244,7 +244,7 @@ def test_confease_saves_nested_values_as_csv(tmp_path):
     conf.set("database.port", 5432)
     conf.save()
 
-    assert Csv.load(path) == {"database.host": "localhost", "database.port": 5432}
+    assert Csv.load(path) == {"database": {"host": "localhost", "port": 5432}}
 
 
 def test_json_file_loads_when_parser_is_inferred(tmp_path):

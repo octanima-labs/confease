@@ -28,6 +28,7 @@ from ruamel.yaml.resolver import VersionedResolver
 from ruamel.yaml.tokens import CommentToken
 from tomlkit.items import Array, Comment, Table, Whitespace
 
+from confease.mappings import flatten, normalized
 from confease.parsers import Csv, Ini, Json, Parser, Toml, Xml, Yaml, _dump_value
 
 
@@ -44,33 +45,44 @@ def equivalent(left: Any, right: Any) -> bool:
     return left == right
 
 
-def normalized(data: Mapping[str, Any]) -> dict[str, Any]:
-    """Validate supported structure and canonicalize dotted keys."""
-    # Lazy import avoids coupling parser registration to model initialization.
-    from confease.model import Confease
-
-    return Confease._nest_mapping(Confease._flatten_mapping(data))
-
-
-def document_layout(keys: Any, values: Mapping[str, Any]) -> dict[str, Any]:
+def document_layout(tree: Mapping[str, Any], values: Mapping[str, Any]) -> dict[str, Any]:
     """Retain existing literal dotted-key nodes instead of dropping comments.
 
     Both dotted and section forms describe the same supported leaves. Keeping an
     existing document's spelling avoids unnecessarily removing surviving nodes.
     """
-    result = {key: dict(value) if isinstance(value, Mapping) else value
-              for key, value in values.items()}
-    for raw_key in keys:
+    def copy_maps(data: Mapping[str, Any]) -> dict[str, Any]:
+        return {key: copy_maps(value) if isinstance(value, Mapping) else value
+                for key, value in data.items()}
+
+    result = copy_maps(values)
+    moved: dict[str, Any] = {}
+    for raw_key in tree:
         key = str(raw_key)
         parts = key.split(".")
-        if len(parts) != 2:
+        if len(parts) == 1:
             continue
-        parent, child = parts
-        section = result.get(parent)
-        if isinstance(section, dict) and child in section:
-            result[key] = section.pop(child)
-            if not section:
-                del result[parent]
+        section = result
+        ancestors = []
+        for part in parts[:-1]:
+            child = section.get(part)
+            if not isinstance(child, dict):
+                break
+            ancestors.append((section, part))
+            section = child
+        else:
+            if parts[-1] not in section:
+                continue
+            moved[key] = section.pop(parts[-1])
+            for parent, part in reversed(ancestors):
+                if parent[part]:
+                    break
+                del parent[part]
+    result.update(moved)
+    for raw_key, node in tree.items():
+        key = str(raw_key)
+        if isinstance(node, Mapping) and isinstance(result.get(key), Mapping):
+            result[key] = document_layout(node, result[key])
     return result
 
 
@@ -102,7 +114,7 @@ class YamlDocument(Document):
         self.yaml.version = (1, 1)
         self.yaml.Resolver = LegacyYamlResolver
         self.yaml.preserve_quotes = True
-        self.tree = self.yaml.load(source) if source.strip() else None
+        self.tree: Any = self.yaml.load(source) if source.strip() else None
         self.header = ""
         if self.tree is None:
             self.tree = CommentedMap()
@@ -420,17 +432,47 @@ class IniDocument(Document):
                 insert += 1
         container.contents = remaining
 
+    def _layout(self, values: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
+        """Project logical terminals into physical dotted INI sections."""
+        flat = flatten(values)
+        wanted: dict[str, dict[str, Any]] = {"DEFAULT": {}}
+
+        def add_sections(data: Mapping[str, Any], prefix: str = ""):
+            for key, value in data.items():
+                path = f"{prefix}.{key}" if prefix else key
+                if isinstance(value, Mapping) and value:
+                    wanted[path] = {}
+                    add_sections(value, path)
+
+        add_sections(values)
+        for section in self.tree._data.contents:
+            if not isinstance(section, LineContainer):
+                continue
+            name = section.name
+            # Keep an existing empty header as the representation of its empty
+            # mapping, rather than moving it to an option and losing annotations.
+            if name != "DEFAULT" and name in flat and flat[name] == {}:
+                wanted[name] = {}
+                del flat[name]
+            for node in section.contents:
+                if not isinstance(node, LineContainer) or not isinstance(node.contents[0], OptionLine):
+                    continue
+                path = node.name if name == "DEFAULT" else f"{name}.{node.name}"
+                if path in flat:
+                    wanted.setdefault(name, {})[node.name] = flat.pop(path)
+        for path, value in flat.items():
+            parent, separator, key = path.rpartition(".")
+            wanted.setdefault(parent if separator else "DEFAULT", {})[key] = value
+        # Drop purely structural headers synthesized above if all descendants
+        # are represented by dotted options elsewhere, unless already present.
+        existing = {node.name for node in self.tree._data.contents if isinstance(node, LineContainer)}
+        return {name: items for name, items in wanted.items()
+                if name == "DEFAULT" or items or name in existing
+                or any(other.startswith(f"{name}.") for other in wanted)}
+
     def render(self, desired: Mapping[str, Any]) -> str:
-        keys = [node.name for section in self.tree._data.contents
-                if isinstance(section, LineContainer) and section.name == "DEFAULT"
-                for node in section.contents
-                if isinstance(node, LineContainer) and isinstance(node.contents[0], OptionLine)]
-        desired = document_layout(keys, desired)
-        old = document_layout(keys, self.values)
-        sections = {key: value for key, value in desired.items() if isinstance(value, Mapping)}
-        defaults = {key: value for key, value in desired.items() if not isinstance(value, Mapping)}
-        wanted = {"DEFAULT": defaults, **sections}
-        old_defaults = {key: value for key, value in old.items() if not isinstance(value, Mapping)}
+        wanted = self._layout(desired)
+        old = self._layout(self.values)
         result = []
         pending = []
         seen = False
@@ -442,8 +484,7 @@ class IniDocument(Document):
             name = node.name
             if name in wanted:
                 result.extend(pending)
-                self._reconcile_lines(node, wanted[name], old_defaults if name == "DEFAULT"
-                                      else old.get(name, {}))
+                self._reconcile_lines(node, wanted[name], old.get(name, {}))
                 result.append(node)
                 existing.add(name)
             elif not seen:
@@ -452,7 +493,7 @@ class IniDocument(Document):
             pending = []
         footer = pending
         for name, values in wanted.items():
-            if name not in existing and values:
+            if name not in existing and (values or name != "DEFAULT"):
                 section = LineContainer(SectionLine(name))
                 self._reconcile_lines(section, values, {})
                 result.append(section)
@@ -564,9 +605,20 @@ class XmlDocument(Document):
         parent[:] = kept + pending
 
     def render(self, desired: Mapping[str, Any]) -> str:
-        keys = [child.get("key") for child in self.tree if child.tag == "entry"]
-        self._reconcile(self.tree, document_layout(keys, desired),
-                        document_layout(keys, self.values), root=True)
+        def layout_tree(parent: ET.Element) -> dict[str, Any]:
+            result: dict[str, Any] = {}
+            for child in parent:
+                if child.tag not in {"entry", "section"}:
+                    continue
+                key = child.get("name") if child.tag == "section" else child.get("key")
+                if key is None:
+                    raise ValueError("XML configuration element has no key/name attribute")
+                result[key] = layout_tree(child) if child.tag == "section" else None
+            return result
+
+        layout = layout_tree(self.tree)
+        self._reconcile(self.tree, document_layout(layout, desired),
+                         document_layout(layout, self.values), root=True)
         if not self.source:
             ET.indent(self.tree, space="  ")
         pieces = ["<?xml version='1.0' encoding='utf-8'?>\n"]

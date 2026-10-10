@@ -168,7 +168,7 @@ conf.reload_cli(Namespace(DEBUG=True, PORT=None))
 
 In this example, `DEBUG` is loaded as a CLI value and `PORT` is ignored.
 
-For nested values, pass a one-level dictionary in the namespace value. It is flattened into dotted keys:
+For nested values, pass an arbitrary-depth dictionary in the namespace value. It is flattened into dotted paths:
 
 ```python
 conf.reload_cli(Namespace(database={"host": "db.internal"}))
@@ -313,7 +313,9 @@ text rather than origin-filtered values. The `user_only` parameter on `save()` i
 
 ## Limitations
 
-- Nested configuration keys support one level only.
+- Dots are reserved path separators; empty segments, duplicate logical paths, and scalar/section collisions at any depth are rejected.
+- Lists remain whole values without indexed configuration paths. Empty mappings retain presence and origins.
+- Persistence requires values supported by the target format; TOML nulls and JSON native Python dates are unsupported.
 - Environment loading only considers keys already known from defaults or loaded files.
 - `save()` writes only `USR` entries by default; use `save(user_only=False)` to write the full effective configuration.
 - Runtime-only configurations created without a path do not persist when saved.

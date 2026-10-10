@@ -31,8 +31,6 @@ def test_init_infers_formats_and_accepts_seeded_draft(tmp_path, editor, parser, 
     assert len(editor) == 1
     assert path.read_bytes() == editor[0]
     expected = {"debug": True, "database": {"port": 5432}}
-    if parser is Csv:
-        expected = {"debug": True, "database.port": 5432}
     assert parser.load(path) == expected
     assert list(tmp_path.glob(".*")) == []
 

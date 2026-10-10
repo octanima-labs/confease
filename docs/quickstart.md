@@ -45,7 +45,7 @@ CONF.save()
 
 ## Nested Keys
 
-`Confease` supports one nested level. Nested leaves are stored internally as dotted keys:
+`Confease` supports arbitrary nesting depth. Nested terminals are stored internally as dotted paths:
 
 ```python
 CONF.set("database", {"host": "localhost", "port": 5432})
@@ -62,7 +62,9 @@ Section access returns a plain snapshot dictionary. Use dotted keys or `set()` t
 CONF["database.port"] = 5433
 ```
 
-Keys can only nest one level. A config cannot contain both a scalar key and a section with the same name, such as `database` and `database.host`.
+Dots separate path segments at any depth. A config cannot contain both a scalar
+key and its descendant, such as `database.primary` and `database.primary.host`.
+Empty mappings are preserved, while lists remain whole values.
 
 ## Parser Selection
 

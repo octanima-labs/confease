@@ -19,6 +19,7 @@ from edital import TuiEditor
 from confease.backups import create_backup, latest_backup
 from confease.documents import install_draft
 from confease.editing import install_text, read_text, text_validator
+from confease.mappings import flatten, nest, validate_key, validate_paths
 from confease.parsers import PARSER_CLASSES, PARSERS, Parser, Yaml
 
 CLI = 'cli' # cli params
@@ -46,8 +47,8 @@ class Confitem:
         """Create a configuration item.
 
         Args:
-            key: Configuration key. Nested leaves are represented with one
-                dotted level, for example ``"database.host"``.
+            key: Configuration path. Nested leaves use dotted segments at any
+                depth, for example ``"database.primary.host"``.
             value: Stored Python value. Values are not coerced to strings.
             origin: Source origin for the value. Must be one of
                 :data:`ORIGINS`.
@@ -104,9 +105,10 @@ class Confease:
     configured ``preference`` decides which origin wins when multiple sources
     define the same key.
 
-    The container supports one nested level. Nested mappings are flattened into
-    dotted ``Confitem`` leaves internally, while nested-capable file formats are
-    saved and loaded as ordinary nested mappings.
+    Nested mappings support arbitrary depth and are flattened into dotted
+    ``Confitem`` terminals internally, including empty mappings. Parsers encode
+    hierarchy for their format and return canonical nested mappings on load.
+    Dots are reserved path separators; lists remain whole values.
     """
 
     def __init__(
@@ -139,9 +141,9 @@ class Confease:
             backup: Keep an exact sibling snapshot before persisted changes to
                 an existing file. Disabled by default; automatic saves inherit
                 this policy. Individual persistence operations can override it.
-            items: In-code default configuration values. One-level nested
-                dictionaries are accepted. Keys may use constructor option names
-                without affecting those options. ``None`` or an empty dictionary
+            items: In-code default configuration values. Arbitrarily nested
+                dictionaries and empty mappings are accepted. Keys may use
+                constructor option names without affecting those options. ``None`` or an empty dictionary
                 provides no defaults. Replaces the former keyword-default API.
             autoload: Load an existing destination during construction by default.
                 When false, defer loading until the first ordinary read, mutation,
@@ -228,85 +230,30 @@ class Confease:
 
     @staticmethod
     def _validate_key(key: str):
-        """Validate that a key is scalar or one-level dotted notation."""
-        parts = key.split(".")
-        if len(parts) > 2 or any(part == "" for part in parts):
-            raise ValueError(f"Nested configuration keys support one level only: {key}")
+        """Validate nonempty segments in a scalar or dotted path."""
+        validate_key(key)
 
     @classmethod
     def _ensure_no_key_collisions(cls, keys):
-        """Reject mixed scalar and section keys such as `database` and `database.host`."""
-        scalar_keys: set[str] = set()
-        section_keys: set[str] = set()
-        for key in keys:
-            cls._validate_key(key)
-            parts = key.split(".")
-            if len(parts) == 1:
-                scalar_keys.add(key)
-            else:
-                section_keys.add(parts[0])
-        collisions = sorted(scalar_keys & section_keys)
-        if collisions:
-            raise ValueError(f"Configuration key collides with nested section: {collisions}")
+        """Reject terminal/section collisions at any depth."""
+        validate_paths(keys)
 
     @classmethod
     def _flatten_mapping(cls, data: Mapping[str, Any]) -> dict[str, Any]:
-        """Flatten a mapping with one-level nested sections into dotted keys."""
-        flat: dict[str, Any] = {}
-
-        def add_item(key: str, value: Any):
-            """Add a flattened item while detecting invalid or duplicate keys."""
-            cls._validate_key(key)
-            if key in flat:
-                raise ValueError(f"Duplicate configuration key: {key}")
-            flat[key] = value
-
-        for raw_key, value in data.items():
-            key = str(raw_key)
-            if isinstance(value, Mapping):
-                if "." in key:
-                    raise ValueError(f"Nested configuration keys support one level only: {key}")
-                for raw_subkey, subvalue in value.items():
-                    if isinstance(subvalue, Mapping):
-                        raise ValueError(f"Nested configuration keys support one level only: {key}.{raw_subkey}")  # noqa: TRY004 - invalid config shape is a value error
-                    add_item(f"{key}.{raw_subkey}", subvalue)
-            else:
-                add_item(key, value)
-
-        cls._ensure_no_key_collisions(flat.keys())
-        return flat
+        """Flatten arbitrary-depth mappings, retaining empty terminals."""
+        return flatten(data)
 
     @classmethod
     def _nest_mapping(cls, data: Mapping[str, Any]) -> dict[str, Any]:
-        """Convert flat dotted keys back into one-level nested sections."""
-        cls._ensure_no_key_collisions(data.keys())
-        nested: dict[str, Any] = {}
-        for key, value in data.items():
-            parts = key.split(".")
-            if len(parts) == 1:
-                nested[key] = value
-            else:
-                parent, child = parts
-                section = nested.setdefault(parent, {})
-                if not isinstance(section, dict):
-                    raise ValueError(f"Configuration key collides with nested section: {parent}")
-                section[child] = value
-        return nested
+        """Reconstruct arbitrary-depth sections from dotted terminal paths."""
+        return nest(data)
 
     def _ensure_key_does_not_collide(self, key: str):
         """Reject setting a key that conflicts with existing scalar or section entries."""
         self._validate_key(key)
         if self._entries is None:
             return
-        parts = key.split(".")
-        if len(parts) == 1:
-            prefix = f"{key}."
-            if any(entry.key.startswith(prefix) for entry in self._entries):
-                raise ValueError(f"Configuration key collides with nested section: {key}")
-        else:
-            parent = parts[0]
-            if any(entry.key == parent for entry in self._entries):
-                raise ValueError(f"Configuration key collides with nested section: {parent}")
+        validate_paths([entry.key for entry in self._entries if entry.key != key] + [key])
 
     def _set_item(self, key: str, value: Any, origin: str, *, force: bool = False):
         """Set an item if allowed by precedence, or always when forced."""
@@ -514,7 +461,7 @@ class Confease:
         self._entries = entries
 
     def get(self, key: str, default = None, cast = None):
-        """Return a value or one-level section by key.
+        """Return a value or recursive section snapshot by path.
 
         Args:
             key: Scalar key, dotted nested key, or section name.
@@ -528,6 +475,8 @@ class Confease:
         """
         item = self.get_item(key)
         val = item.value if item is not None else self._get_section(key)
+        if isinstance(val, Mapping):
+            val = self._nest_mapping(self._flatten_mapping(val))
         if val is None:
             return default
         if cast:
@@ -559,36 +508,38 @@ class Confease:
         return None
 
     def _get_section(self, key: str) -> dict[str, Any] | None:
-        """Return a plain dict for a one-level section, or None when absent."""
+        """Reconstruct descendants as a nested plain dict, or None when absent."""
         if self._entries is None:
             return None
         self._validate_key(key)
         prefix = f"{key}."
         section = {entry.key.removeprefix(prefix): entry.value for entry in self._entries if entry.key.startswith(prefix)}
-        return section or None
+        return self._nest_mapping(section) if section else None
 
     def set(self, key: str, value: Any):
         """Store a user-origin value.
 
         Args:
             key: Scalar key, dotted nested key, or section name when ``value``
-                is a one-level mapping.
+                is an arbitrary-depth mapping.
             value: Python value to store. Nested dictionaries are flattened into
                 dotted leaves.
 
         Raises:
-            ValueError: If nested keys exceed one level or a scalar key collides
-                with a section key.
+            ValueError: If paths contain empty segments, duplicate logical keys,
+                or terminal/section collisions at any depth.
         """
         self._ensure_entries()
         items = self._flatten_mapping({key: value})
+        existing = {entry.key for entry in self._entries or []}
+        self._ensure_no_key_collisions(existing | items.keys())
         for item_key, item_value in items.items():
             self._set_item(item_key, item_value, USR, force=True)
         if self._reload:
             self.save()
 
     def delete(self, key: str) -> bool:
-        """Remove an effective leaf or all leaves in a one-level section.
+        """Remove an effective terminal or every descendant of a section.
 
         Returns true when at least one entry was removed, including null-valued
         entries, and false for a missing key. With ``reload=True``, read the
@@ -808,7 +759,7 @@ class Confease:
 
         Args:
             namespace: Parsed command-line namespace. Attribute names become
-                config keys, and nested dictionaries are flattened one level.
+                config paths, and nested dictionaries are flattened recursively.
         """
         self._ensure_entries()
         data = {key: value for key, value in vars(namespace).items() if value is not None}
