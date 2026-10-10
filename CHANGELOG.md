@@ -7,6 +7,27 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## [3.0.0] - 2026-10-10
+
+### Added
+
+- Add `Confease.edit_file(template=PATH)` and `confease init PATH --template PATH` to preload exact template text for missing destinations without changing configured defaults. Explicit acceptance creates the target even when the template is unchanged.
+- Provide embedded terminal editing through Edital 0.2.0, including contextual help, literal and regular-expression find/replace, and undoable replacements.
+- Retain accepted text in a recovery file when backup or installation fails, reporting its path through CLI diagnostics or exception notes.
+
+### Changed
+
+- Validate interactive edits in the same session, keeping invalid candidates available for correction without changing destination content or live configuration entries.
+- Install accepted text without reserialization, preserving comments, formatting, uniform LF/CRLF line endings, and final-newline presence. Cancelled sessions preserve existing files and unsaved in-memory values, and leave missing destinations absent.
+- Refuse to overwrite a destination created while a missing-target editing session is open.
+- Install the published `edital>=0.2.0,<0.3` dependency automatically and document its current keyboard controls and configuration-editing workflows.
+- Use F2 or F3 to validate and accept text, Ctrl+Q to cancel, and Escape to dismiss interactions. F4 opens Find and F5 opens Find/Replace.
+
+### Breaking Changes
+
+- Interactive CLI editing and `Confease.edit_file()` now default to an embedded transactional editor requiring interactive terminal input and output, rather than external-editor discovery. Library callers can assign `conf.editor = TextEditor(...)` to retain external direct-file editing; scripted CLI updates and deletions remain noninteractive.
+- Default manual-edit backups now occur after explicit acceptance and validation, immediately before installation. Cancellation and rejected candidates create no backup. Explicitly selected external editors retain pre-launch backups and their existing invalid-save behavior.
+
 ## [2.0.0] - 2026-10-07
 
 ### Added
