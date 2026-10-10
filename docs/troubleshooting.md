@@ -52,17 +52,39 @@ CLI > ENV > SYS > USR > DEF
 
 ## Editing A File Fails
 
-`edit_file()` opens the real file and validates it after the editor exits. If you manually save invalid content, that content remains on disk and the error is reported; the library does not restore the previous file. Previous in-memory entries remain intact. Re-open the file, fix the issue, save, and call `load()` again. Common causes include a non-mapping YAML file, unsupported nesting, a missing CSV `key,value` header, or invalid XML shape. With `reload=True`, reads continue to report the invalid file until it is fixed.
+Default editing validates on F2 or F3 (Accept & close). Invalid candidates stay in the same
+session for correction without changing the destination. Common causes include a
+non-mapping YAML file, unsupported nesting, a missing CSV `key,value` header, or
+invalid XML shape. Ctrl+Q cancels; a missing target remains absent on cancellation.
+Escape only dismisses an interaction; use F1 for keyboard help.
 
-A missing file stays absent when the editor closes without saving. Save manually to create it. If an old call raises `TypeError` for `user_only`, replace `edit_file(user_only=...)` with `edit_file()`; `save(user_only=...)` is still supported.
+The embedded editor needs interactive terminal input and output. Run it in a
+terminal rather than with redirected streams; use CLI updates/deletions for
+scripts. The Edital dependency supplies Textual. Mixed LF/CRLF line endings and
+bare-CR separators must be converted to uniform LF or CRLF before editing.
 
-If no editor opens, configure one explicitly:
+Edital 0.2.0 is available on PyPI and installed automatically as a dependency;
+see [installation](installation.md) for setup instructions. Editor APIs must be imported
+from `edital`, not `confease` or the removed `confease.tui_editor` module.
+
+After an installation or backup failure, look for `Accepted editor text retained
+at:` in CLI diagnostics or exception notes. That recovery file contains the
+accepted candidate; correct the filesystem issue before retrying installation.
+
+If an old call raises `TypeError` for `user_only`, replace
+`edit_file(user_only=...)` with `edit_file()`; `save(user_only=...)` is still supported.
+
+Library callers can choose an external editor explicitly:
 
 ```python
 from confease import TextEditor
 
 conf.editor = TextEditor("nano")
 ```
+
+This requires the external executable and edits the real file. Invalid saves
+remain on disk; fix them before `load()` or automatic reload. The explicit
+external choice does not change the CLI's embedded editor.
 
 ## Template Restoration Fails
 

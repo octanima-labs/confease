@@ -3,6 +3,7 @@
 from datetime import datetime
 
 import pytest
+from edital import EditResult
 
 from confease import Json, Yaml
 from confease.cli import main
@@ -20,10 +21,10 @@ def frozen_time(monkeypatch):
 
 @pytest.fixture
 def no_editor(monkeypatch):
-    def unexpected(*args):
+    def unexpected(*args, **kwargs):
         pytest.fail("Scripted edit/restore must not launch an editor")
 
-    monkeypatch.setattr("confease.cli.TextEditor.open", unexpected)
+    monkeypatch.setattr("confease.cli.TuiEditor.edit", unexpected)
 
 
 @pytest.mark.parametrize("flag", ["-b", "--backup"])
@@ -47,16 +48,19 @@ def test_interactive_repair_snapshot_only_at_acceptance(tmp_path, monkeypatch):
     path.write_bytes(original)
     calls = []
 
-    def edit(self, draft):
-        assert draft != path
+    def edit(self, text, *, title, validator):
+        assert text.encode() == original
         assert path.read_bytes() == original
         assert list(tmp_path.glob("*.bkp")) == []
-        calls.append(draft)
-        draft.write_bytes(b"key: [\n" if len(calls) == 1 else repaired)
+        calls.append(text)
+        assert validator("key: [\n") is not None
+        assert list(tmp_path.glob("*.bkp")) == []
+        assert validator(repaired.decode()) is None
+        return EditResult("accepted", repaired.decode())
 
-    monkeypatch.setattr("confease.cli.TextEditor.open", edit)
+    monkeypatch.setattr("confease.cli.TuiEditor.edit", edit)
     assert main([str(path), "--backup"]) == 0
-    assert len(calls) == 2
+    assert len(calls) == 1
     assert path.read_bytes() == repaired
     assert next(tmp_path.glob("*.bkp")).read_bytes() == original
     assert list(tmp_path.glob(".*")) == []
@@ -66,11 +70,10 @@ def test_cancelled_protected_edit_has_no_snapshot(tmp_path, monkeypatch):
     path = tmp_path / "settings.yaml"
     path.write_text("key: old\n")
 
-    def cancel(self, draft):
-        draft.write_text("key: changed\n")
-        raise KeyboardInterrupt
+    def cancel(self, text, **kwargs):
+        return EditResult("cancelled")
 
-    monkeypatch.setattr("confease.cli.TextEditor.open", cancel)
+    monkeypatch.setattr("confease.cli.TuiEditor.edit", cancel)
     assert main([str(path), "-b"]) == 130
     assert path.read_text() == "key: old\n"
     assert list(tmp_path.glob("*.bkp")) == []
@@ -89,16 +92,23 @@ def test_cli_backup_failure_preserves_target(tmp_path, monkeypatch, capsys, oper
     if operation == "scripted":
         args = [str(path), "-u", "key=new", "-b"]
     elif operation == "interactive":
-        monkeypatch.setattr("confease.cli.TextEditor.open", lambda self, draft: draft.write_text("key: new\n"))
+        monkeypatch.setattr("confease.cli.TuiEditor.edit", lambda self, text, **kwargs: EditResult("accepted", "key: new\n"))
         args = [str(path), "-b"]
     else:
         source = tmp_path / "historical"
         source.write_text("key: new\n")
         args = ["restore", str(path), "--from", str(source), "-b"]
     assert main(args) == 1
-    assert "snapshot failed" in capsys.readouterr().err
+    diagnostic = capsys.readouterr().err
+    assert "snapshot failed" in diagnostic
     assert path.read_text() == "key: old\n"
-    assert list(tmp_path.glob(".*")) == []
+    if operation == "interactive":
+        drafts = list(tmp_path.glob(".*"))
+        assert len(drafts) == 1
+        assert drafts[0].read_text() == "key: new\n"
+        assert str(drafts[0]) in diagnostic
+    else:
+        assert list(tmp_path.glob(".*")) == []
 
 
 @pytest.mark.parametrize("existing", [False, True])

@@ -1,6 +1,7 @@
 """CLI integration tests use controlled editors instead of a real terminal."""
 
 import pytest
+from edital import EditResult
 
 from confease import Csv, Ini, Json, Toml, Xml, Yaml
 from confease.cli import main
@@ -10,10 +11,12 @@ from confease.cli import main
 def editor(monkeypatch):
     calls = []
 
-    def open_draft(self, path):
-        calls.append(path.read_bytes())
+    def edit(self, text, *, title, validator):
+        calls.append(text.encode())
+        assert validator(text) is None
+        return EditResult("accepted", text)
 
-    monkeypatch.setattr("confease.cli.TextEditor.open", open_draft)
+    monkeypatch.setattr("confease.cli.TuiEditor.edit", edit)
     return calls
 
 
@@ -42,6 +45,25 @@ def test_init_default_and_explicit_format_keep_path(tmp_path, editor):
     assert main(["init", str(other), "-f", "json", "-i", "key=2"]) == 0
     assert Json.load(other) == {"key": 2}
     assert not other.with_suffix(".json").exists()
+
+
+@pytest.mark.parametrize("name", ["settings.yaml", "settings.yml", "settings"])
+@pytest.mark.parametrize("add_key", [False, True])
+def test_empty_yaml_init_preloads_edit_ready_document(tmp_path, monkeypatch, name, add_key):
+    path = tmp_path / name
+    initial = "%YAML 1.1\n---\n"
+
+    def edit(self, text, *, title, validator):
+        assert text == initial
+        assert not path.exists()
+        candidate = text + "custom: value\n" if add_key else text
+        assert validator(candidate) is None
+        return EditResult("accepted", candidate)
+
+    monkeypatch.setattr("confease.cli.TuiEditor.edit", edit)
+    assert main(["init", str(path)]) == 0
+    assert path.read_text() == (initial + "custom: value\n" if add_key else initial)
+    assert Yaml.load(path) == ({"custom": "value"} if add_key else {})
 
 
 def test_unknown_format_and_existing_init_do_not_launch_editor(tmp_path, editor, capsys):
@@ -160,15 +182,18 @@ def test_interactive_invalid_source_and_draft_are_repaired(tmp_path, monkeypatch
     calls = []
     valid = b"# header\r\nkey: 2 # inline\r\n"
 
-    def open_draft(self, draft):
-        calls.append(draft.read_bytes())
+    def edit(self, text, *, title, validator):
+        calls.append(text.encode())
         assert path.read_bytes() == original
-        draft.write_bytes(b"key: [1\n" if len(calls) == 1 else valid)
+        assert validator("key: [1\n") is not None
+        assert path.read_bytes() == original
+        assert validator(valid.decode()) is None
+        return EditResult("accepted", valid.decode())
 
-    monkeypatch.setattr("confease.cli.TextEditor.open", open_draft)
+    monkeypatch.setattr("confease.cli.TuiEditor.edit", edit)
     assert main(["edit", str(path)]) == 0
-    assert calls == [original, b"key: [1\n"]
-    assert "Reopening" in capsys.readouterr().err
+    assert calls == [original]
+    assert "Reopening" not in capsys.readouterr().err
     assert path.read_bytes() == valid
     assert list(tmp_path.glob(".*")) == []
 
@@ -177,11 +202,10 @@ def test_interactive_invalid_source_and_draft_are_repaired(tmp_path, monkeypatch
 def test_editor_failure_preserves_existing_or_missing_destination(tmp_path, monkeypatch, failure):
     path = tmp_path / "settings.yaml"
 
-    def open_draft(self, draft):
-        draft.write_text("key: changed\n")
+    def edit(self, text, **kwargs):
         raise failure()
 
-    monkeypatch.setattr("confease.cli.TextEditor.open", open_draft)
+    monkeypatch.setattr("confease.cli.TuiEditor.edit", edit)
     assert main(["init", str(path)]) != 0
     assert not path.exists()
     path.write_text("key: original\n")
@@ -193,13 +217,16 @@ def test_editor_failure_preserves_existing_or_missing_destination(tmp_path, monk
 def test_init_does_not_overwrite_destination_created_during_editor(tmp_path, monkeypatch):
     path = tmp_path / "settings.yaml"
 
-    def open_draft(self, draft):
+    def edit(self, text, **kwargs):
         path.write_text("key: concurrent\n")
+        return EditResult("accepted", text)
 
-    monkeypatch.setattr("confease.cli.TextEditor.open", open_draft)
+    monkeypatch.setattr("confease.cli.TuiEditor.edit", edit)
     assert main(["init", str(path), "-i", "key=initial"]) == 1
     assert path.read_text() == "key: concurrent\n"
-    assert list(tmp_path.glob(".*")) == []
+    drafts = list(tmp_path.glob(".*"))
+    assert len(drafts) == 1
+    assert Yaml.load(drafts[0]) == {"key": "initial"}
 
 
 def test_generic_validation_does_not_claim_application_schema(tmp_path, editor):

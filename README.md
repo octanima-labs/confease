@@ -22,7 +22,17 @@ cd confease
 hatch run pytest
 ```
 
-The package requires Python 3.11 or newer.
+The package requires Python 3.11 or newer. The `edital` dependency provides the
+Textual editor. Interactive editing needs terminal input and output; no separately
+installed editor application is required. Scripted edits do not start the TUI.
+
+Edital 0.2.0 is available on PyPI and is installed automatically as a dependency
+(`edital>=0.2.0,<0.3`). Hatch uses this published dependency for local development.
+For pip-based development, install Confease in editable mode:
+
+```bash
+python -m pip install -e /path/to/confease/public
+```
 
 ## Quickstart
 
@@ -31,8 +41,11 @@ The package requires Python 3.11 or newer.
 The installed `confease` command creates, edits, and restores configuration files:
 
 ```bash
-# Open a new, preloaded draft in your default editor
+# Open a new, preloaded buffer in the embedded terminal editor
 confease init settings.yaml -i debug=true -i database.port=5432
+
+# Preload an exact template; leave the target absent if you abandon the edit
+confease init settings.yaml --template defaults.yaml
 
 # Edit or repair an existing file interactively
 confease edit settings.yaml
@@ -61,6 +74,12 @@ any update or deletion selects noninteractive editing. A batch cannot update a
 deleted leaf or a child of a deleted section, but deleting a scalar and adding a
 child can convert it into a section.
 
+`init --template PATH` is mutually exclusive with `--item`. It preloads exact
+template text, using the format selected from the destination or `--format`
+regardless of the template's suffix. **F2/F3 (Accept & close)** explicitly accepts the
+buffer, including an unchanged template. Cancellation leaves the target absent.
+Invalid templates fail before launch; invalid edits stay available for correction.
+
 `init` refuses existing destinations, and `edit` requires an existing file. Format
 selection uses `-f/--format` first, then a recognized suffix. Extensionless `init`
 defaults to YAML; extensionless `edit`/`restore` and unknown suffixes require an override:
@@ -88,14 +107,35 @@ quotes and becomes a string. YAML also interprets tokens such as `yes` as boolea
 Assignments split at the first `=`. Invalid keys and values that the destination
 cannot represent (such as TOML `null`) are rejected before replacement.
 
-Interactive editing uses a draft. Invalid saved drafts print errors and reopen
-with your edits intact; a valid draft is installed as exact bytes, preserving
-comments and formatting. This also lets you repair a file that is already invalid.
-Successful editor exit accepts the current valid draft, including an unchanged
-seeded `init` draft. Interrupt the session with Ctrl-C to cancel installation.
-Editor failure leaves the destination unchanged. The editor resolver uses
-`EDITOR`, then `VISUAL`, then available fallback editors, with wait flags for
-known graphical editors.
+Interactive `init` and `edit` use one embedded Textual session:
+
+| Key | Action |
+| --- | --- |
+| **F1** | Show contextual keyboard help. |
+| **F2 / F3** | Validate and accept the current text, then close. |
+| **Ctrl-Q** | Cancel; changed text requires discard confirmation. |
+| **Esc** | Dismiss help, a dialog, or search; otherwise leave the session open. |
+| **F4** | Find text; Enter locates the next occurrence, wrapping to the start. |
+| **F5** | Find/Replace, with replace-one and replace-all actions. |
+| **Ctrl-Z / Ctrl-Y** | Undo / redo. |
+| **Shift + arrows** | Select text. |
+| **F7** | Select all. |
+
+Find and Find/Replace support literal text or Python regular expressions.
+Replacements are undoable and must pass configuration validation on acceptance.
+Editing uses an in-memory buffer without cached or resumable drafts: accept to
+install the changes, or cancel to discard them.
+
+Validation errors appear in the same session, preserving text, cursor, and undo
+history. Only accepted valid text is installed, preserving comments, formatting,
+uniform LF/CRLF line endings, and final-newline presence. Mixed line endings and
+bare-CR separators are rejected rather than silently normalized. Existing invalid
+files can be opened for repair. Cancellation returns CLI status 130; other failures
+return nonzero. The original destination stays untouched until installation.
+
+If installation or backup fails after acceptance, the CLI reports a recovery file
+containing the accepted text. Interactive invocation with redirected input or
+output reports a terminal error; use `--update`/`--delete` for scripted editing.
 
 Scripted edits require a valid source document and preserve comments through
 round-trip document adapters. Unaffected order and formatting are retained where
@@ -164,7 +204,7 @@ conf = Confease("settings.yaml", __backup__=True)
 conf.set("retries", 5)
 conf.save()                       # inherits the instance policy
 conf.save(backup=False)           # skips the snapshot for this save only
-conf.edit_file(backup=True)       # snapshots before opening the real file
+conf.edit_file(backup=True)       # snapshots after acceptance, before installation
 conf.reset(backup=True)           # snapshots when restoring a template to disk
 
 conf.restore()                   # latest matching sibling; inherits backup=True
@@ -202,9 +242,10 @@ overwritten. For `settings`, the name is `settings-20261007-143052.bkp`; for
 `app.settings.toml`, it is `app.settings-20261007-143052.toml.bkp`.
 
 Draft-based writes validate first, then back up immediately before replacement.
-Cancelled or invalid CLI drafts create no snapshot. Direct API `edit_file()`
-backs up before launching its editor, so its snapshot remains even if no changes
-are saved. A backup failure aborts replacement or direct editor launch. Complete
+Cancelled or rejected embedded editing creates no snapshot, for both CLI and API
+sessions. Explicit external API editing backs up before launching its editor, so
+its snapshot remains even if no changes are saved. A backup failure aborts
+replacement or direct editor launch. Complete
 snapshots remain available if subsequent installation fails. Backups are not
 pruned automatically; manage their retention as needed.
 
@@ -332,7 +373,50 @@ YAML, JSON, TOML, INI, and XML persist one-level nested sections. CSV persists f
 
 ## Edit Config Files
 
-`edit_file()` opens the real configured path in a blocking text editor without serializing it first, preserving comments and formatting:
+`edit_file()` preloads exact file text in the embedded editor without serializing
+in-memory values. It returns the same configuration instance after acceptance or
+cancellation:
+
+```python
+conf = Confease("settings.yaml", retries=3)
+conf.edit_file()
+```
+
+F2 or F3 accepts validated text and installs it before updating live entries. Ctrl+Q
+cancels, preserving the file and live entries, including unsaved in-memory values.
+A missing file stays absent on cancellation. Parent directories are created when
+needed for installation. Installation failure retains accepted text in a recovery
+file and adds its path to the exception notes.
+
+### Preload a missing file
+
+Pass an edit-only template to show its contents automatically when the target
+does not exist:
+
+```python
+conf = Confease("settings.yaml")
+conf.edit_file(template="defaults.yaml")
+```
+
+The template is validated with the active parser before launch. Existing targets
+open normally and ignore the template argument. This argument does not change the
+instance's configured defaults or constructor template; to use the same file for
+both, pass it explicitly to both the constructor and `edit_file()`. F2 or F3 creates the
+target even if the preloaded text is unchanged. Installation refuses to overwrite
+a target created during editing. First creation has no previous file to back up.
+
+### Edital integration
+
+The reusable editor now lives in the independent `edital` package. Import
+`edit_text`, `TuiEditor`, `EditResult`, and `Validator` directly from `edital`;
+Confease no longer exports editor APIs or contains a `confease.tui_editor` module.
+See Edital's documentation for standalone text editing. Confease supplies its
+parser/key validator and owns installation, backups, recovery files, and live
+configuration synchronization. UI imports remain lazy.
+
+### Explicit external editors
+
+The public external launcher remains available for library consumers:
 
 ```python
 from confease import TextEditor
@@ -341,13 +425,23 @@ conf.editor = TextEditor("code")
 conf.edit_file()
 ```
 
-Save manually in the editor. A missing file stays missing if you close without saving; parent directories are created as needed. Valid saved content is reloaded. Invalid saved content raises an error and remains on disk, while the previous in-memory entries stay intact.
+This explicitly selected path edits the real file and validates after editor exit.
+Invalid saves remain on disk while previous live entries are retained; enabled
+backups happen before launch. External command discovery uses `EDITOR`, then
+`VISUAL`, then available fallbacks, adding wait flags for known graphical editors.
+It does not configure the default TUI or the CLI.
 
-The installed CLI uses the retained-draft repair loop described above. The
-library's direct-file `edit_file()` API keeps explicit save control and reports
-invalid saves without reverting their text.
+For missing-target template preloading, Vim/Neovim use native unsaved buffers;
+other external commands use seeded drafts with best-effort filesystem save
+detection. A detected save is validated before create-only installation. Saving
+unchanged text is reliable in the TUI but best-effort for external draft editors.
+Written fallback drafts are retained on failure with recovery paths in exception
+notes. The external launcher still requires its executable to be installed.
 
-**Upgrading:** Replace `edit_file(user_only=...)` with `edit_file()`. The removed argument no longer applies because editing opens the actual file rather than generating filtered content. `save(user_only=...)` is unchanged.
+**Upgrading:** Embedded transactional editing is now the default; explicitly
+assign `TextEditor(...)` to keep direct-file behavior. Default backups now happen
+after acceptance, not before launch. Replace `edit_file(user_only=...)` with
+`edit_file()`; `save(user_only=...)` is unchanged.
 
 ## Templates And Reset
 

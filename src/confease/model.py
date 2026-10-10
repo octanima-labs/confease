@@ -14,10 +14,11 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from edital import TuiEditor
 
 from confease.backups import create_backup, latest_backup
 from confease.documents import install_draft
-from confease.editors import TextEditor
+from confease.editing import install_text, read_text, text_validator
 from confease.parsers import PARSER_CLASSES, PARSERS, Parser, Yaml
 
 CLI = 'cli' # cli params
@@ -148,7 +149,7 @@ class Confease:
         self._preference: list[str] | None = None
         self._template: Path | None = None
         self._parser: type[Parser]
-        self.editor = TextEditor()
+        self.editor: Any = TuiEditor()
         self.preference = preference
 
 
@@ -587,35 +588,65 @@ class Confease:
         """Reserved for a future detailed printable representation."""
         # print the configuration in the console
     
-    def edit_file(self, *, backup: bool | None = None):
-        """Edit the configured file through a blocking text editor.
+    def edit_file(self, *, template: str | Path | None = None, backup: bool | None = None):
+        """Edit exact file text transactionally in the embedded terminal editor.
 
-        Open the real path in ``self.editor`` without serializing or creating
-        the file first, preserving existing comments and formatting. The user
-        must save manually. Parent directories are created if needed.
-
-        Valid saved content is reloaded after the editor exits. Invalid saved
-        content raises an error and remains on disk while the previous
-        in-memory entries stay intact. A missing target remains absent if the
-        user does not save; only in-memory defaults are initialized.
+        F2 or F3 validates and accepts text; Ctrl+Q cancels, confirming discard
+        if changed. Escape dismisses interactions; F1 shows help, F4 opens Find,
+        and F5 opens Find/Replace. Invalid candidates stay in the same session. Only
+        accepted valid text is installed, without reserialization. Cancellation
+        preserves destination content and live entries, including unsaved values.
 
         Args:
+            template: Seed a missing target with this file's exact content.
+                This edit-only template does not change configured defaults.
+                Explicit acceptance creates the target even if text is unchanged.
+                Existing targets ignore this argument.
             backup: ``None`` inherits the instance policy. When enabled, copy
-                the existing file before editor launch, retaining the snapshot
-                even if no changes are saved. Backup failure prevents launch.
+                the existing file after acceptance and validation, immediately
+                before installation. Cancellation creates no backup.
 
         Returns:
             The current ``Confease`` instance.
 
         Raises:
-            FileNotFoundError: If the instance has no configured path.
-            ValueError: If the edited file is invalid for the active parser.
-            Exception: If launching or waiting for the editor fails.
+            FileNotFoundError: If the instance has no configured path or a
+                template needed for a missing target does not exist.
+            ValueError: If a needed template is invalid or line endings are mixed.
+            RuntimeError: If no interactive terminal is available.
+            Exception: If the editor or installation fails.
+
+        Notes:
+            Accepted candidates are retained with a recovery path in exception
+            notes on installation failure. Missing-target installation refuses
+            to overwrite a target created during editing. An explicitly assigned
+            external ``TextEditor`` retains direct-file editing, pre-launch backup,
+            and invalid-saved-bytes behavior, with best-effort template drafts for
+            non-Vim/Neovim commands.
         """
         if self._path is None:
             raise FileNotFoundError("No configuration path provided")
 
         edit_path = self._path.expanduser()
+        if hasattr(self.editor, "edit"):
+            missing = not edit_path.exists()
+            if template is not None and missing:
+                source = Path(template).expanduser()
+                self._entries_for_load(self._parser.load(source))
+                initial = read_text(source)
+            else:
+                initial = "" if missing else read_text(edit_path)
+            result = self.editor.edit(initial, title=str(edit_path),
+                                      validator=text_validator(self._parser, self._entries_for_load))
+            if result.outcome == "accepted":
+                if result.text is None:
+                    raise ValueError("Accepted editor result has no text")
+                entries = install_text(result.text, edit_path, self._parser, self._entries_for_load,
+                                       create_only=missing, backup=self._backup_enabled(backup))
+                self._entries = entries
+            return self
+        if template is not None and not edit_path.exists():
+            return self._edit_missing_from_template(edit_path, Path(template).expanduser())
         edit_path.parent.mkdir(parents=True, exist_ok=True)
         if self._backup_enabled(backup):
             create_backup(edit_path)
@@ -625,6 +656,52 @@ class Confease:
         else:
             self._initialize_entries()
         return self
+
+    def _edit_missing_from_template(self, target: Path, template: Path):
+        """Preload a missing file, retaining saved fallback drafts on failure."""
+        # Validate before launch, without incorporating these values as defaults.
+        self._entries_for_load(self._parser.load(template))
+        target.parent.mkdir(parents=True, exist_ok=True)
+        preload = getattr(self.editor, "_open_preloaded", None)
+        if preload is not None and preload(target, template):
+            if target.exists():
+                self.load()
+            return self
+
+        draft: Path | None = None
+        retain = False
+        try:
+            with tempfile.NamedTemporaryFile(dir=target.parent, prefix=f".{target.name}.",
+                                             suffix=target.suffix, delete=False) as file:
+                draft = Path(file.name)
+            shutil.copyfile(template, draft)
+            initial = self._draft_signature(draft)
+            try:
+                self.editor.open(draft)
+            finally:
+                # Preserve written work even when the editor exits unsuccessfully.
+                retain = draft.exists() and self._draft_signature(draft) != initial
+            if not retain:
+                return self
+            entries = self._entries_for_load(self._parser.load(draft))
+            install_draft(draft, target, create_only=True)
+            retain = False
+            self._entries = entries
+        except BaseException as error:
+            if retain:
+                error.add_note(f"Saved editor draft retained at: {draft}")
+            raise
+        finally:
+            if draft is not None and not retain:
+                draft.unlink(missing_ok=True)
+        return self
+
+    @staticmethod
+    def _draft_signature(path: Path):
+        """Detect in-place and replacement saves, including unchanged bytes."""
+        info = path.stat()
+        return (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns,
+                info.st_ctime_ns, path.read_bytes())
 
     
     def load_sources(self, cli: Namespace | None = None, *files, preference: list[str] | None = None):

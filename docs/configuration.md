@@ -181,32 +181,75 @@ defaults to YAML; unknown suffixes and extensionless edits require a format.
 Initial items and updates use YAML-typed `KEY=VALUE` arguments in every format;
 retain value quotes with shell quoting, for example `-u 'label="true"'`.
 
-Interactive CLI editing opens a draft even when the original file is invalid.
-Validation failures report errors and reopen that same draft for correction.
-Successful editor exit accepts valid content, which is installed as exact draft
-bytes. Ctrl-C or editor failure cancels installation. Scripted updates and
+Interactive CLI editing preloads exact text even when the original file is invalid.
+F2 or F3 validates and accepts it; errors stay in the same session with
+text, cursor, and undo history intact. Ctrl+Q cancels with discard confirmation
+for changed text; Escape dismisses interactions. F1 shows keyboard help, F4 opens
+Find, and F5 opens Find/Replace, with literal and Python-regex modes. Only accepted valid text is installed without
+reserialization. Cancellation returns status 130; editor failures do not install
+content. Scripted updates and
 deletions operate as one validated batch and require a valid source document.
 Application-specific rules are not validated without an application schema.
+Editing buffers are memory-only: changes are accepted or discarded, without
+cached or resumable drafts. Backups preserve previous committed file content.
 
 ## Editing Files Manually
 
 Use `edit_file()` when you want users or maintainers to edit the configured file manually:
 
 ```python
-from confease import Confease, TextEditor
+from confease import Confease
 
 conf = Confease("~/.config/my-app/conf.yaml", DEBUG=False)
+conf.edit_file()
+```
+
+The embedded Textual editor preloads the exact document, preserving comments,
+whitespace, uniform LF/CRLF line endings, and trailing-newline presence. Mixed line
+endings and bare-CR separators are rejected before launch. F2 or F3 validates and accepts
+the buffer, then Confease installs it atomically and updates live entries. Ctrl+Q cancels and
+preserves destination content and prior live entries, including unsaved values.
+Missing targets stay absent on cancellation. No external editor executable is needed.
+
+`conf.edit_file(template="defaults.yaml")` preloads a validated edit-only template
+for a missing target. Accepting unchanged text still creates the target; an existing
+target ignores the template. This does not change configured defaults. Create-only
+installation refuses a target created during editing.
+
+Enabled backups are taken after acceptance and validation, immediately before
+installation; cancellation creates none. If backup or installation fails, previous
+content and live entries remain intact, and exception notes identify a recovery
+file containing accepted text.
+
+To retain external direct-file behavior explicitly:
+
+```python
+from confease import TextEditor
+
 conf.editor = TextEditor("code")
 conf.edit_file()
 ```
 
-`edit_file()` opens the actual configured path without generating a draft or rewriting its content. Comments and formatting remain under user control. The library creates missing parent directories but leaves creation of the file to a manual editor save. Closing without saving a missing file leaves it absent.
+That path backs up before launch and validates after editor exit. Invalid saves
+remain on disk with previous live entries intact. With `reload=True`, subsequent
+reads continue to report invalid file content until repaired. Native Vim/Neovim
+template preloading and best-effort seeded drafts for other external commands
+remain available. They do not affect default CLI editing.
 
-After the editor exits successfully, valid file contents are reloaded. Invalid manually saved content raises a parser or key-validation error and stays on disk; the last valid in-memory entries are retained. Fix and save the file before calling `load()` again. With `reload=True`, subsequent reads also attempt to load that file and will continue to raise until it is fixed.
+Confease imports its editor from the independent `edital` package. Editor APIs
+(`edit_text`, `TuiEditor`, `EditResult`, and `Validator`) are exported only by
+`edital`; standalone usage and canonical editor API contracts are documented
+there. Confease owns configuration validation, installation, backups, recovery,
+and live-entry synchronization. Its [external launcher reference](api/editors.rst)
+remains generated from Confease's source docstrings.
 
 ### Migrating Existing Calls
 
-Replace `conf.edit_file(user_only=True)` and `conf.edit_file(user_only=False)` with `conf.edit_file()`. Entry-origin filtering has been removed from editing because it opens the real file directly. The `user_only` parameter on `save()` is unchanged.
+Embedded transactional editing replaces the default external/direct-file workflow.
+Assign `TextEditor(...)` explicitly if that behavior is needed. Default manual-edit
+backups now happen just before installation rather than before launch. Replace
+`conf.edit_file(user_only=...)` with `conf.edit_file()`; editing preloads document
+text rather than origin-filtered values. The `user_only` parameter on `save()` is unchanged.
 
 ## Limitations
 

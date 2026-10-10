@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "confease"
-version = "2.0.0"
+version = "3.0.0"
 description = "Small Python configuration helper with predictable source precedence"
 readme = "README.md"
 license = "MIT"
@@ -28,6 +28,7 @@ dependencies = [
   "ruamel.yaml>=0.19.1",
   "tomlkit>=0.15.1",
   "iniparse>=0.5",
+  "edital>=0.2.0,<0.3",
 ]
 
 [project.scripts]
