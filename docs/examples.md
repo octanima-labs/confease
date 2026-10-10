@@ -87,18 +87,20 @@ conf["database.host"] = "db.internal"
 
 ## Edit a Config File
 
-Let a user edit the actual file while keeping fallback defaults in code:
+Let a user edit exact document text transactionally while keeping fallback defaults in code:
 
 ```python
-from confease import Confease, TextEditor
+from confease import Confease
 
 conf = Confease("~/.config/my-app/conf.yaml", THEME="light")
-conf.editor = TextEditor("nano")
-
 conf.edit_file()
 ```
 
-Save manually in the editor. Existing comments are preserved without serialization. A missing file is not created unless the editor saves it. Valid saves update the configuration object; invalid saves remain on disk and raise an error while preserving previous in-memory entries.
+Press F2 or F3 to validate, accept, and close; Ctrl+Q cancels. Escape dismisses
+interactions; F1 shows help, F4 opens Find, and F5 opens Find/Replace. Invalid candidates stay in
+the same session for correction. Existing comments and formatting are preserved
+without reserialization. Missing targets are created only after explicit acceptance;
+cancellation preserves the destination and previous live entries.
 
 ## Restore A Template
 

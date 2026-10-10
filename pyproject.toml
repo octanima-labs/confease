@@ -28,6 +28,7 @@ dependencies = [
   "ruamel.yaml>=0.19.1",
   "tomlkit>=0.15.1",
   "iniparse>=0.5",
+  "edital>=0.2.0,<0.3",
 ]
 
 [project.scripts]

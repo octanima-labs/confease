@@ -140,6 +140,9 @@ def test_direct_editor_snapshot_precedes_launch(tmp_path, monkeypatch, override,
     conf = Confease(path, __backup__=True)
     previous = conf._entries
 
+    from confease import TextEditor
+    conf.editor = TextEditor()
+
     def edit(target):
         assert target == path
         assert len(snapshots(path)) == count
@@ -157,6 +160,8 @@ def test_direct_editor_snapshot_precedes_launch(tmp_path, monkeypatch, override,
 def test_direct_editor_missing_target_and_unchanged_snapshot(tmp_path, monkeypatch):
     path = tmp_path / "settings.yaml"
     conf = Confease(path, __backup__=True)
+    from confease import TextEditor
+    conf.editor = TextEditor()
     monkeypatch.setattr(conf.editor, "open", lambda target: None)
     conf.edit_file()
     assert not path.exists()
@@ -175,6 +180,8 @@ def test_backup_failure_prevents_mutation_or_editor(tmp_path, monkeypatch, opera
     conf = Confease(path, template=template, __backup__=True)
     conf.set("key", "unsaved")
     previous = conf._entries.copy()
+    from confease import TextEditor
+    conf.editor = TextEditor()
 
     def fail(target):
         raise OSError("snapshot failed")

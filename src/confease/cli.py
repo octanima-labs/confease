@@ -2,9 +2,7 @@
 
 import argparse
 import configparser
-import shutil
 import sys
-import tempfile
 import tomllib
 import xml.etree.ElementTree as ET
 from collections.abc import Sequence
@@ -12,9 +10,16 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from edital import TuiEditor
 
-from confease.documents import equivalent, install_draft, normalized, render_document
-from confease.editors import TextEditor
+from confease.documents import equivalent, normalized, render_document
+from confease.editing import (
+    EditCancelled,
+    install_text,
+    read_text,
+    text_validator,
+    validate_text,
+)
 from confease.model import Confease
 from confease.parsers import PARSER_CLASSES, Parser, Yaml
 
@@ -24,10 +29,12 @@ def argument_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="confease",
         description="Create, edit, and restore configuration files while preserving comments.",
-        epilog="Shorthand: confease PATH [edit options]. Values use YAML syntax.",
+        epilog="Shorthand: confease PATH [edit options]. Values use YAML syntax. "
+               "Interactive editor: F2/F3 accepts and closes; Ctrl+Q cancels; Escape dismisses; "
+               "F1 shows help; F4 finds; F5 replaces.",
     )
     commands = parser.add_subparsers(dest="command", required=True)
-    init = commands.add_parser("init", help="Create a new configuration in your editor.")
+    init = commands.add_parser("init", help="Create a new configuration in the embedded terminal editor.")
     edit = commands.add_parser("edit", help="Edit or repair an existing configuration.")
     restore = commands.add_parser("restore", help="Restore an explicit or latest configuration backup.")
     for command in (init, edit, restore):
@@ -38,7 +45,7 @@ def argument_parser() -> argparse.ArgumentParser:
     seed.add_argument("-i", "--item", action="append", default=[], metavar="KEY=VALUE",
                       help="Seed the editor draft with a typed value; repeat as needed.")
     seed.add_argument("--template", type=Path, metavar="PATH",
-                      help="Preload a template; create the target only on save (best-effort outside Vim/Neovim).")
+                      help="Preload a template; create the target only on accept & close (F2/F3).")
     edit.add_argument("-u", "--update", action="append", default=[], metavar="KEY=VALUE",
                       help="Add or replace a typed value without opening an editor.")
     edit.add_argument("-d", "--delete", action="append", default=[], metavar="KEY",
@@ -97,39 +104,26 @@ def scripted_edit(path: Path, parser: type[Parser], updates: Sequence[str], dele
 
 
 def interactive_edit(path: Path, parser: type[Parser], *, initializing: bool,
-                     items: Sequence[str] = (), backup: bool = False):
-    """Retain invalid draft edits for correction and install exact valid bytes."""
-    desired = Confease._nest_mapping(assignments(items)) if initializing else {}
-    initial = render_document(parser, "", {}, desired) if initializing else None
-    path.parent.mkdir(parents=True, exist_ok=True)
-    draft = None
-    try:
-        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent,
-                                         prefix=f".{path.name}.", suffix=parser.extensions[0],
-                                         delete=False, newline="") as file:
-            draft = Path(file.name)
-            if initial is not None:
-                file.write(initial)
-        if initializing:
-            # Invalid/unrepresentable initial items fail before opening an editor.
-            if not equivalent(normalized(parser.load(draft)), desired):
-                raise ValueError(f"Initial values cannot be faithfully represented by {parser.__name__}")
+                     items: Sequence[str] = (), backup: bool = False,
+                     template: Path | None = None):
+    """Edit one buffer, validate in-session, and install only explicit acceptance."""
+    if initializing:
+        if template is not None:
+            initial = read_text(template.expanduser())
+            validate_text(initial, parser, normalized)
         else:
-            shutil.copyfile(path, draft)
-        editor = TextEditor()
-        while True:
-            editor.open(draft)
-            try:
-                normalized(parser.load(draft))
-            except (ValueError, yaml.YAMLError, configparser.Error, ET.ParseError, tomllib.TOMLDecodeError) as error:
-                print(f"Invalid draft: {error}\nReopening the draft for correction; press Ctrl-C to cancel.",
-                      file=sys.stderr)
-                continue
-            install_draft(draft, path, create_only=initializing, backup=backup)
-            return
-    finally:
-        if draft is not None:
-            draft.unlink(missing_ok=True)
+            desired = Confease._nest_mapping(assignments(items))
+            initial = "%YAML 1.1\n---\n" if not desired and issubclass(parser, Yaml) else render_document(parser, "", {}, desired)
+            if not equivalent(validate_text(initial, parser, normalized), desired):
+                raise ValueError(f"Initial values cannot be faithfully represented by {parser.__name__}")
+    else:
+        initial = read_text(path)
+    result = TuiEditor().edit(initial, title=str(path), validator=text_validator(parser, normalized))
+    if result.outcome == "cancelled":
+        raise EditCancelled()
+    if result.text is None:
+        raise ValueError("Accepted editor result has no text")
+    install_text(result.text, path, parser, normalized, create_only=initializing, backup=backup)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -153,13 +147,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             conf.restore(options.source, backup=options.backup)
         elif not initializing and (options.update or options.delete):
             scripted_edit(path, parser, options.update, options.delete, backup=options.backup)
-        elif initializing and options.template is not None:
-            Confease(path, parser=parser).edit_file(template=options.template)
         else:
             interactive_edit(path, parser, initializing=initializing,
                              items=options.item if initializing else (),
-                             backup=False if initializing else options.backup)
-    except KeyboardInterrupt as error:
+                             backup=False if initializing else options.backup,
+                             template=options.template if initializing else None)
+    except (KeyboardInterrupt, EditCancelled) as error:
         print("Cancelled.", file=sys.stderr)
         for note in getattr(error, "__notes__", ()):
             print(note, file=sys.stderr)

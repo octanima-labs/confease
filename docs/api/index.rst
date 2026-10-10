@@ -10,3 +10,4 @@ API descriptions are generated from source docstrings with Sphinx autodoc, Napol
 
    core
    parsers
+   editors
