@@ -39,7 +39,7 @@ def test_text_editor_adds_known_visual_wait_flags(monkeypatch):
     assert TextEditor("code --wait")._editor_command() == ["code", "--wait"]
 
 
-@pytest.mark.parametrize("content", ["- invalid\n", "KEY: [\n", "a.b.c: invalid\n", "a: scalar\na.b: collision\n"])
+@pytest.mark.parametrize("content", ["- invalid\n", "KEY: [\n", "a..b: invalid\n", "a: scalar\na.b: collision\n"])
 def test_edit_file_keeps_invalid_save_and_previous_memory(tmp_path, content):
     path = tmp_path / "conf.yaml"
     path.write_text("KEY: original\n")

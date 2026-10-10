@@ -182,10 +182,10 @@ def test_scalar_and_nested_key_collisions_raise_errors():
         other.set("database.host", "localhost")
 
 
-def test_nested_keys_support_one_level_only():
+def test_nested_keys_support_arbitrary_depth():
     conf = Confease()
 
-    with pytest.raises(ValueError, match="one level"):
-        conf.set("a.b.c", "value")
-    with pytest.raises(ValueError, match="one level"):
-        conf.set("a", {"b": {"c": "value"}})
+    conf.set("a.b.c", "value")
+    conf.set("a", {"b": {"d": "sibling"}})
+    assert conf["a.b"] == {"c": "value", "d": "sibling"}
+    assert conf["a"]["b"]["c"] == "value"

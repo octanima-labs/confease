@@ -57,7 +57,7 @@ def test_runtime_only_deferred_defaults_and_autoload_data_are_independent():
     ({"parser": object}, ValueError),
     ({"preference": ["unknown"]}, ValueError),
     ({"items": []}, TypeError),
-    ({"items": {"a.b.c": 1}}, ValueError),
+    ({"items": {"a..b": 1}}, ValueError),
 ])
 def test_deferred_constructor_still_validates_controls_and_defaults(tmp_path, options, error):
     path = tmp_path / "settings.yaml"

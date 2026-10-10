@@ -170,7 +170,7 @@ conf = Confease(
 conf.load_sources(args, "/etc/my-app/conf.yaml")
 ```
 
-Pass in-code defaults through `items`, a dictionary supporting one-level nested
+Pass in-code defaults through `items`, a dictionary supporting arbitrary-depth nested
 sections. Omitted `items`, `items=None`, and `items={}` provide no defaults;
 other input types raise `TypeError`. Configuration keys can use any constructor
 option name, including `path`, `backup`, or `items`, without changing those options.
@@ -355,7 +355,8 @@ case. Backups do not add locking or concurrent-writer merging.
 
 ## Nested Keys
 
-`Confease` supports one nested level. Internally, nested leaves are stored as dotted keys:
+`Confease` supports arbitrary nesting depth, independently of the file format.
+Internally, terminal values are stored as dotted paths with individual origins:
 
 ```python
 conf.set("database", {"host": "localhost", "port": 5432})
@@ -364,19 +365,37 @@ conf.get("database.host")    # "localhost"
 conf["database.host"]        # "localhost"
 conf.get("database")         # {"host": "localhost", "port": 5432}
 conf["database"]["host"]     # "localhost"
+
+conf.set("database.primary", {"connection": {"host": "db.internal"}})
+conf["database.primary.connection.host"]  # "db.internal"
+conf["database"]["primary"]["connection"]["host"]  # "db.internal"
+conf["database.primary"]    # {"connection": {"host": "db.internal"}}
 ```
 
-Section access returns a plain snapshot dictionary. Missing subkeys raise `KeyError`, so write nested values through dotted keys or `set()`:
+Section access at any depth returns a plain nested snapshot dictionary. Changes
+to its structure do not assign configuration values. Missing subkeys raise
+`KeyError`, so write nested values through dotted keys or `set()`:
 
 ```python
 conf["database.port"] = 5433
 ```
+
+Mapping assignments merge compatible leaves and retain unspecified siblings.
+Dots in keys always separate paths: `{"a.b": {"c": 1}}` means `a → b → c`.
+Empty path segments, duplicate logical paths, and scalar/section conflicts such
+as `a.b = 1` alongside `a.b.c = 2` are rejected. Literal-dot escaping is not supported.
+
+Empty mappings are retained: `conf.set("units", {})` makes `conf["units"]` return
+`{}`, distinct from an absent key, and gives that mapping a user origin. Lists
+remain whole values, including lists containing mappings; there are no indexed
+configuration paths such as `units.0.name`.
 
 Delete a leaf or a section explicitly:
 
 ```python
 conf.delete("database.port")  # True if present, including a null-valued leaf
 conf.delete("database")       # removes all leaves in the section
+conf.delete("database.primary.connection")  # removes only this deep subtree
 conf.delete("absent")         # False
 conf.save()
 ```
@@ -449,7 +468,103 @@ yaml_conf = Confease("conf.yaml", parser=None)
 json_conf = Confease("conf.json", parser=Json)
 ```
 
-YAML, JSON, TOML, INI, and XML persist one-level nested sections. CSV persists flat dotted keys with a `key,value` header.
+Every built-in parser loads a canonical nested mapping. YAML, JSON, and TOML
+use native hierarchy; XML uses recursive sections. INI-family formats encode
+hierarchy in dotted section names, and CSV uses full dotted row keys with the
+existing `key,value` header. Loading reverses those encodings.
+
+For example, this YAML configuration:
+
+```yaml
+key:
+  one: 1
+  subkey:
+    two: 2
+    subsubkey:
+      three: 3
+      subsubsubkey: hello
+```
+
+can be represented natively in TOML:
+
+```toml
+[key]
+one = 1
+
+[key.subkey]
+two = 2
+
+[key.subkey.subsubkey]
+three = 3
+subsubsubkey = "hello"
+```
+
+INI uses the same paths as flat section names, reconstructed by Confease on load:
+
+```ini
+[key]
+one = 1
+
+[key.subkey]
+two = 2
+
+[key.subkey.subsubkey]
+three = 3
+subsubsubkey = hello
+```
+
+XML uses the existing vocabulary recursively:
+
+```xml
+<config>
+  <section name="key">
+    <entry key="one">1</entry>
+    <section name="subkey">
+      <entry key="two">2</entry>
+      <section name="subsubkey">
+        <entry key="three">3</entry>
+        <entry key="subsubsubkey">hello</entry>
+      </section>
+    </section>
+  </section>
+</config>
+```
+
+CSV stores terminal paths:
+
+```csv
+key,value
+key.one,1
+key.subkey.two,2
+key.subkey.subsubkey.three,3
+key.subkey.subsubkey.subsubsubkey,hello
+```
+
+INI-family, XML entry text, and CSV values use YAML typing to preserve numbers,
+booleans, nulls, and supported lists. New empty mappings use native empty nodes
+in YAML/JSON/TOML/XML and explicit `{}` values in INI options or CSV rows;
+existing empty INI section headers also load as empty mappings.
+
+Switching formats preserves structure and types within the target format's
+supported value domain. TOML has no null value, and JSON does not support native
+Python dates, for example. Unsupported values fail saving before replacement;
+values are not silently stringified and no TOML null markers are introduced.
+
+### CSV Loader Migration
+
+Direct `Csv.load()` now returns nested dictionaries rather than flat dotted keys:
+
+```python
+from confease import Csv, Ini
+
+data = Csv.load("conf.csv")
+data["key"]["subkey"]["two"]  # 2; formerly data["key.subkey.two"]
+Ini.save("conf.ini", data)    # the same shared mapping works across parsers
+```
+
+`Confease["key.subkey.two"]` continues to support dotted lookup. Existing shallow
+files remain readable, but older Confease versions cannot read the newly supported
+deep representations. See [file-format guidance](docs/file-formats.md) for details.
 
 ## Edit Config Files
 

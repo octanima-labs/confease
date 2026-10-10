@@ -95,8 +95,8 @@ def test_items_accept_dictionary_subclasses():
 
 
 @pytest.mark.parametrize("items", [
-    {"a": {"b": {"c": 1}}},
-    {"a.b.c": 1},
+    {"a": {"b": {"": 1}}},
+    {"a..b": 1},
     {"database": "sqlite", "database.host": "localhost"},
     {"database": {"host": "localhost"}, "database.host": "remote"},
 ])

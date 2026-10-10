@@ -25,7 +25,9 @@ Environment values are parsed with `yaml.safe_load`, so `true` becomes `True`, `
 
 ## Nested Keys Raise A Collision Error
 
-Nested keys support one level only, and scalar keys cannot share a name with a section. These shapes are invalid together:
+Nested paths support arbitrary depth, but scalar keys cannot also be sections.
+Dots separate paths; empty segments and duplicate logical paths are invalid.
+These shapes are invalid together:
 
 ```yaml
 database: sqlite

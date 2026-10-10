@@ -79,7 +79,7 @@ def test_recover_missing_or_malformed_destination(tmp_path, existing):
         assert others[0].read_text() == "key: [\n"
 
 
-@pytest.mark.parametrize("content", ["key: [\n", "- invalid\n", "a.b.c: invalid\n", "key.child: collision\n"])
+@pytest.mark.parametrize("content", ["key: [\n", "- invalid\n", "a..b: invalid\n", "key.child: collision\n"])
 def test_invalid_latest_source_preserves_live_state_without_fallback(tmp_path, content):
     path = tmp_path / "settings.yaml"
     path.write_text("key: current\n")

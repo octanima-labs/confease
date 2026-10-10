@@ -60,7 +60,7 @@ def test_accept_validates_before_backup_and_preserves_exact_text(tmp_path, monke
     def edit(text, *, title, validator):
         assert text.encode() == original
         assert validator("key: [\n") is not None
-        assert validator("a.b.c: invalid\n") is not None
+        assert validator("a..b: invalid\n") is not None
         assert validator("key: new\n") is None
         assert conf._entries is previous
         assert path.read_bytes() == original

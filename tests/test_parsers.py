@@ -63,7 +63,7 @@ def test_csv_parser_loads_and_saves_flat_dotted_mapping(tmp_path):
 
     Csv.save(path, {"KEY": "value", "database": {"host": "localhost", "port": 5432}})
 
-    assert Csv.load(path) == {"KEY": "value", "database.host": "localhost", "database.port": 5432}
+    assert Csv.load(path) == {"KEY": "value", "database": {"host": "localhost", "port": 5432}}
     with path.open(newline="") as file:
         rows = list(csv_module.DictReader(file))
     assert rows == [
@@ -173,8 +173,8 @@ def test_xml_parser_rejects_invalid_shapes(tmp_path):
     with pytest.raises(ValueError, match="name attribute"):
         Xml.load(path)
 
-    path.write_text("<config><section name='section'><section name='nested'></section></section></config>")
-    with pytest.raises(ValueError, match="only contain entry"):
+    path.write_text("<config><section name='section'><item key='nested'></item></section></config>")
+    with pytest.raises(ValueError, match="Unsupported"):
         Xml.load(path)
 
 

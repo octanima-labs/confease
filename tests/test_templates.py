@@ -50,7 +50,7 @@ def test_reset_restores_exact_template_bytes(tmp_path, existing):
     assert list(path.parent.iterdir()) == [path]
 
 
-@pytest.mark.parametrize("content", [None, "KEY: [\n", "- invalid\n", "a.b.c: invalid\n"])
+@pytest.mark.parametrize("content", [None, "KEY: [\n", "- invalid\n", "a..b: invalid\n"])
 def test_failed_template_validation_preserves_file_and_memory(tmp_path, content):
     template = tmp_path / "template.yaml"
     template.write_text("KEY: default\n")

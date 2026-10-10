@@ -9,6 +9,8 @@ from typing import Any
 
 import yaml
 
+from confease.mappings import flatten, flatten_items, nest, normalized, validate_key
+
 YAML = '.yaml'
 YML = '.yml'
 JSON = '.json'
@@ -42,7 +44,33 @@ def _dump_value(value: Any) -> str:
 
 def _load_value(value: str) -> Any:
     """Parse YAML scalar text back into a Python value."""
-    return yaml.safe_load(value)
+    return yaml.load(value, Loader=ConfigurationLoader)
+
+
+class ConfigurationLoader(yaml.SafeLoader):
+    """Retain safe YAML semantics while rejecting duplicate explicit keys."""
+
+    def construct_mapping(self, node, deep=False):
+        keys = set()
+        for key_node, _ in node.value:
+            if key_node.tag == "tag:yaml.org,2002:merge":
+                continue
+            key = self.construct_object(key_node, deep=deep)
+            if isinstance(key, (str, int, float, bool, type(None))):
+                if key in keys:
+                    raise ValueError(f"Duplicate configuration key: {key}")
+                keys.add(key)
+        return super().construct_mapping(node, deep=deep)
+
+
+def _json_object(items: list[tuple[str, Any]]) -> dict[str, Any]:
+    """Reject JSON duplicate keys before object construction loses them."""
+    result: dict[str, Any] = {}
+    for key, value in items:
+        if key in result:
+            raise ValueError(f"Duplicate configuration key: {key}")
+        result[key] = value
+    return result
 
 
 def _save_document(parser: type["Parser"], path: str | Path, data: Mapping[str, Any], *, backup: bool = False):
@@ -68,8 +96,8 @@ class Parser:
 
         Args:
             path: Destination file path.
-            data: Mapping to serialize. Nested-capable parsers accept one-level
-                nested mappings.
+            data: Mapping to serialize, with arbitrary-depth mappings, dotted
+                paths, empty mappings, and format-supported terminal values.
             **kwargs: Reserved for parser-specific options.
 
         Raises:
@@ -86,7 +114,8 @@ class Parser:
             **kwargs: Reserved for parser-specific options.
 
         Returns:
-            A dictionary containing scalar values or one-level nested mappings.
+            A canonical nested dictionary. Dotted file paths are reconstructed
+            into hierarchy, including CSV row keys and INI section names.
 
         Raises:
             NotImplementedError: Always raised by the base class.
@@ -117,13 +146,13 @@ class Yaml(Parser):
         """
         load_path = Path(path).expanduser()
         with load_path.open() as file:
-            data = yaml.safe_load(file)
+            data = yaml.load(file, Loader=ConfigurationLoader)
 
         if data is None:
             return {}
         if not isinstance(data, dict):
             raise ValueError(f"Configuration file must contain a key-value mapping: {load_path}")  # noqa: TRY004 - invalid document shape is a value error
-        return {str(key): value for key, value in data.items()}
+        return normalized(data)
 
 
 class Json(Parser):
@@ -149,17 +178,18 @@ class Json(Parser):
         """
         load_path = Path(path).expanduser()
         with load_path.open() as file:
-            data = json.load(file)
+            data = json.load(file, object_pairs_hook=_json_object)
 
         if not isinstance(data, dict):
             raise ValueError(f"Configuration file must contain a key-value mapping: {load_path}")  # noqa: TRY004 - invalid document shape is a value error
-        return {str(key): value for key, value in data.items()}
+        return normalized(data)
 
 
 class Toml(Parser):
     """TOML semantic loader with ``tomlkit`` round-trip writes.
 
-    TOML naturally supports one-level sections as tables.
+    TOML supports arbitrary-depth native tables. Unsupported values such as
+    ``None`` raise on save rather than being coerced or marker-encoded.
     """
 
     extensions = (TOML,)
@@ -173,16 +203,16 @@ class Toml(Parser):
     def load(path: str | Path, **kwargs) -> dict[str, Any]:
         """Read TOML mapping data."""
         with Path(path).expanduser().open("rb") as file:
-            return tomllib.load(file)
+            return normalized(tomllib.load(file))
 
 
 class Ini(Parser):
-    """INI-family parser using ConfigParser sections for one-level nesting.
+    """INI-family parser using dotted section names for arbitrary nesting.
 
     Top-level values are stored in ``DEFAULT``. Section values are stored as
-    ordinary INI sections. Individual values are serialized as YAML scalar text
-    so booleans, numbers, nulls, and simple lists can round-trip as Python
-    values.
+    ordinary INI sections named by their full parent path. Individual values
+    use YAML text so booleans, numbers, nulls, lists containing mappings, and
+    empty mappings can round-trip. Loading merges section paths into a tree.
     """
 
     extensions: tuple[str, ...] = (INI, CFG, CONF, CONFIG)
@@ -199,7 +229,7 @@ class Ini(Parser):
         """Write mapping data as INI, storing values as YAML scalar text.
 
         Raises:
-            ValueError: If nested mappings exceed one level.
+            ValueError: If paths conflict or emitted values cannot round-trip.
         """
         _save_document(Ini, path, data, backup=kwargs.get("backup", False))
 
@@ -211,16 +241,29 @@ class Ini(Parser):
         with load_path.open() as file:
             config.read_file(file)
 
-        data: dict[str, Any] = {key: _load_value(value) for key, value in config.defaults().items()}
+        items = [(key, _load_value(value)) for key, value in config.defaults().items()]
+        empty_sections = []
         sections: dict[str, dict[str, str]] = getattr(config, "_sections")  # noqa: B009 - private attribute is absent from ConfigParser type stubs
         for section in config.sections():
-            section_items = {
-                key: _load_value(value)
+            validate_key(section)
+            section_items = [
+                (f"{section}.{key}", _load_value(value))
                 for key, value in sections[section].items()
                 if key != "__name__"
-            }
-            data[section] = section_items
-        return data
+            ]
+            items.extend(section_items)
+            if not section_items:
+                empty_sections.append(section)
+        flat = flatten_items(items)
+        for section in empty_sections:
+            # An empty parent header with a child section declares hierarchy,
+            # not an extra terminal that would collide with its descendants.
+            if any(key.startswith(f"{section}.") for key in flat):
+                continue
+            if any(other.startswith(f"{section}.") for other in empty_sections):
+                continue
+            items.append((section, {}))
+        return nest(flatten_items(items))
 
 
 class Cfg(Ini):
@@ -230,7 +273,7 @@ class Cfg(Ini):
 
 
 class Xml(Parser):
-    """XML parser using ``entry`` leaves and one-level ``section`` elements.
+    """XML parser using ``entry`` leaves and recursive ``section`` elements.
 
     XML files use a ``<config>`` root. Entry text is serialized as YAML scalar
     text so supported scalar values can round-trip as Python values.
@@ -243,7 +286,7 @@ class Xml(Parser):
         """Write mapping data as XML with YAML-typed entry text.
 
         Raises:
-            ValueError: If nested mappings exceed one level.
+            ValueError: If paths conflict or emitted values cannot round-trip.
         """
         _save_document(Xml, path, data, backup=kwargs.get("backup", False))
 
@@ -260,31 +303,26 @@ class Xml(Parser):
         if root.tag != "config":
             raise ValueError(f"XML configuration root must be <config>: {load_path}")
 
-        data: dict[str, Any] = {}
-        for element in root:
-            if element.tag == "entry":
-                key, value = Xml._read_entry(element)
-                if key in data:
+        def read_mapping(parent: ET.Element) -> dict[str, Any]:
+            items: list[tuple[str, Any]] = []
+            seen: set[str] = set()
+            for element in parent:
+                if element.tag == "entry":
+                    key, value = Xml._read_entry(element)
+                elif element.tag == "section":
+                    name = element.attrib.get("name")
+                    if not name:
+                        raise ValueError("XML section elements must define a name attribute")
+                    key, value = name, read_mapping(element)
+                else:
+                    raise ValueError(f"Unsupported XML configuration element: {element.tag}")
+                if key in seen:
                     raise ValueError(f"Duplicate XML configuration key: {key}")
-                data[key] = value
-            elif element.tag == "section":
-                name = element.attrib.get("name")
-                if not name:
-                    raise ValueError("XML section elements must define a name attribute")
-                if name in data:
-                    raise ValueError(f"Duplicate XML configuration key: {name}")
-                section: dict[str, Any] = {}
-                for child in element:
-                    if child.tag != "entry":
-                        raise ValueError(f"XML sections may only contain entry elements: {name}")
-                    key, value = Xml._read_entry(child)
-                    if key in section:
-                        raise ValueError(f"Duplicate XML configuration key: {name}.{key}")
-                    section[key] = value
-                data[name] = section
-            else:
-                raise ValueError(f"Unsupported XML configuration element: {element.tag}")
-        return data
+                seen.add(key)
+                items.append((key, value))
+            return nest(flatten_items(items))
+
+        return read_mapping(root)
 
     @staticmethod
     def _append_entry(parent: ET.Element, key: str, value: Any):
@@ -300,7 +338,7 @@ class Xml(Parser):
             raise ValueError("XML entry elements must define a key attribute")
         if len(element):
             raise ValueError(f"XML entry elements cannot contain child elements: {key}")
-        return key, yaml.safe_load(element.text or "")
+        return key, _load_value(element.text or "")
 
 
 class Csv(Parser):
@@ -308,7 +346,8 @@ class Csv(Parser):
 
     CSV stores every value as a flat row. Nested sections are written as dotted
     keys such as ``database.host``. Values are serialized as YAML scalar text so
-    simple Python values can round-trip.
+    supported Python values, including lists and empty mappings, can round-trip.
+    Loading returns reconstructed nested dictionaries, not flat row keys.
     """
 
     extensions = (CSV,)
@@ -318,44 +357,34 @@ class Csv(Parser):
         """Write mapping data as CSV, flattening nested sections.
 
         Raises:
-            ValueError: If nested mappings exceed one level.
+            ValueError: If paths conflict or emitted values cannot round-trip.
         """
         _save_document(Csv, path, data, backup=kwargs.get("backup", False))
 
     @staticmethod
     def load(path: str | Path, **kwargs) -> dict[str, Any]:
-        """Read CSV data and parse each value from YAML scalar text.
+        """Read YAML-typed rows and reconstruct their dotted paths into a tree.
 
         Raises:
             ValueError: If the header is not exactly ``key,value`` or a row is
-                malformed.
+                malformed, duplicates a logical path, or conflicts with a section.
         """
         load_path = Path(path).expanduser()
         with load_path.open(newline="") as file:
             reader = csv.DictReader(file)
             if reader.fieldnames != ["key", "value"]:
                 raise ValueError(f"CSV configuration file must use header: key,value: {load_path}")
-            data: dict[str, Any] = {}
+            items: list[tuple[str, Any]] = []
             for row in reader:
                 if set(row) != {"key", "value"} or row["key"] in [None, ""] or row["value"] is None:
                     raise ValueError(f"Malformed CSV configuration row: {row}")
-                data[str(row["key"])] = _load_value(row["value"])
-        return data
+                items.append((str(row["key"]), _load_value(row["value"])))
+        return nest(flatten_items(items))
 
     @staticmethod
     def _flatten(data: Mapping[str, Any]) -> dict[str, Any]:
         """Flatten nested mapping sections into dotted keys for CSV output."""
-        flat: dict[str, Any] = {}
-        for raw_key, value in data.items():
-            key = str(raw_key)
-            if isinstance(value, Mapping):
-                for raw_subkey, subvalue in value.items():
-                    if isinstance(subvalue, Mapping):
-                        raise ValueError(f"CSV configuration keys support one nested level only: {key}.{raw_subkey}")  # noqa: TRY004 - invalid config shape is a value error
-                    flat[f"{key}.{raw_subkey}"] = subvalue
-            else:
-                flat[key] = value
-        return flat
+        return flatten(data)
 
 
 PARSER_CLASSES: dict[str, type[Parser]] = {
