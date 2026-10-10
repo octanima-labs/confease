@@ -30,7 +30,7 @@ Origins
 
 .. data:: DEF
 
-   Origin name for keyword defaults or configured template values.
+   Origin name for defaults supplied through ``items`` or configured template values.
 
 .. data:: ORIGINS
 

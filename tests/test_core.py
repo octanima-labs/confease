@@ -26,14 +26,14 @@ def test_preference_rejects_duplicate_origin():
 
 
 def test_get_returns_default_for_missing_key():
-    conf = Confease(EXISTING="value")
+    conf = Confease(items={"EXISTING": "value"})
 
     assert conf.get("MISSING") is None
     assert conf.get("MISSING", default="fallback") == "fallback"
 
 
 def test_get_casts_values_and_keeps_string_on_cast_failure():
-    conf = Confease(NUMBER=1312)
+    conf = Confease(items={"NUMBER": 1312})
 
     assert conf.get("NUMBER") == 1312
     assert conf.get("NUMBER", cast=int) == 1312
@@ -42,7 +42,7 @@ def test_get_casts_values_and_keeps_string_on_cast_failure():
 
 
 def test_get_item_returns_confitem():
-    conf = Confease(KEY="value")
+    conf = Confease(items={"KEY": "value"})
 
     item = conf.get_item("KEY")
 
@@ -102,7 +102,7 @@ def test_set_force_updates_even_when_user_origin_is_lower_priority():
 
 
 def test_nested_defaults_support_dotted_and_section_access():
-    conf = Confease(database={"host": "localhost", "port": 5432})
+    conf = Confease(items={"database": {"host": "localhost", "port": 5432}})
 
     assert conf.get("database.host") == "localhost"
     assert conf.get("database.port") == 5432
@@ -129,7 +129,7 @@ def test_set_supports_dotted_nested_keys():
 
 
 def test_indexed_access_returns_values_and_none_for_missing_keys():
-    conf = Confease(KEY="value")
+    conf = Confease(items={"KEY": "value"})
 
     assert conf["KEY"] == "value"
     assert conf["MISSING"] is None
@@ -155,7 +155,7 @@ def test_indexed_assignment_supports_nested_dict_values():
 
 
 def test_indexed_access_supports_dotted_and_section_reads():
-    conf = Confease(database={"host": "localhost", "port": 5432})
+    conf = Confease(items={"database": {"host": "localhost", "port": 5432}})
 
     assert conf["database.host"] == "localhost"
     assert conf["database"] == {"host": "localhost", "port": 5432}
@@ -163,7 +163,7 @@ def test_indexed_access_supports_dotted_and_section_reads():
 
 
 def test_indexed_section_reads_return_plain_dicts_with_key_errors():
-    conf = Confease(database={"host": "localhost"})
+    conf = Confease(items={"database": {"host": "localhost"}})
 
     with pytest.raises(KeyError):
         conf["database"]["missing"]

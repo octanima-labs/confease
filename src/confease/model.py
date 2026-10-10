@@ -109,7 +109,18 @@ class Confease:
     saved and loaded as ordinary nested mappings.
     """
 
-    def __init__(self, path: str | Path | None = None, reload: bool = False, parser: type[Parser] | None = Yaml, template: str | Path | None = None, preference = (CLI, ENV, SYS, USR, DEF), __backup__: bool = False, **kwargs):
+    def __init__(
+        self,
+        path: str | Path | None = None,
+        reload: bool = False,
+        parser: type[Parser] | None = Yaml,
+        template: str | Path | None = None,
+        preference = (CLI, ENV, SYS, USR, DEF),
+        backup: bool = False,
+        items: dict[str, Any] | None = None,
+        *,
+        autoload: bool = True,
+    ):
         """Initialize a configuration object.
 
         Args:
@@ -121,30 +132,41 @@ class Confease:
                 parser from the file suffix.
             template: Optional default configuration file, read with the active
                 parser as default-origin values without copying to ``path``.
-                Cannot be combined with keyword defaults. Explicit ``reset()``
+                Cannot be combined with nonempty ``items``. Explicit ``reset()``
                 restores its exact content to ``path`` and reloads it.
             preference: Origins ordered from highest to lowest priority.
                 Omitted origins are appended after the provided ones.
-            __backup__: Keep an exact sibling snapshot before persisted changes to
+            backup: Keep an exact sibling snapshot before persisted changes to
                 an existing file. Disabled by default; automatic saves inherit
                 this policy. Individual persistence operations can override it.
-                The ordinary ``backup`` keyword remains a configuration default.
-            **kwargs: In-code default configuration values. One-level nested
-                dictionaries are accepted.
+            items: In-code default configuration values. One-level nested
+                dictionaries are accepted. Keys may use constructor option names
+                without affecting those options. ``None`` or an empty dictionary
+                provides no defaults. Replaces the former keyword-default API.
+            autoload: Load an existing destination during construction by default.
+                When false, defer loading until the first ordinary read, mutation,
+                save, or source overlay. Recovery through transactional editing,
+                reset, or restore bypasses this initial destination load. Parser,
+                defaults, preference, and template validation still occur.
 
         Raises:
-            AttributeError: If both ``template`` and keyword defaults are given.
+            AttributeError: If both ``template`` and nonempty ``items`` are given.
+            TypeError: If ``items`` is neither a dictionary nor ``None``, or a
+                legacy/unknown constructor keyword is supplied.
             FileNotFoundError: If the configured template is missing.
             ValueError: If the parser or source preference is invalid.
         """
+        if items is not None and not isinstance(items, dict):
+            raise TypeError("items must be a dictionary or None")
+        items = {} if items is None else items
         if path is None:
             self._path: Path | None = None
             print("[-] Runtime-only configuration. No path provided, so conf file will not persist")
         else:
             self._path = Path(path).expanduser()
         self._reload = bool(reload) # if reload, changes are saved instantly and each time conf is accessed, it is readed from file; in this way the conf 'reloads' itself
-        self._backup = bool(__backup__)
-        self._defaults: list[Confitem] = [Confitem(k, v, DEF) for k, v in self._flatten_mapping(kwargs).items()]
+        self._backup = bool(backup)
+        self._defaults: list[Confitem] = [Confitem(k, v, DEF) for k, v in self._flatten_mapping(items).items()]
         self._entries: list[Confitem] | None = None
         self._preference: list[str] | None = None
         self._template: Path | None = None
@@ -154,7 +176,7 @@ class Confease:
 
 
         if template:
-            if len(kwargs.keys()) == 0:
+            if not items:
                 self._template = Path(template).expanduser()
             else:
                 raise AttributeError("Template and default values are not compatible. Use a single default source")
@@ -173,7 +195,7 @@ class Confease:
             self._defaults = [Confitem(key, value, DEF) for key, value in
                               self._flatten_mapping(self._parser.load(self._template)).items()]
 
-        if self._path is not None and self._path.exists():
+        if autoload and self._path is not None and self._path.exists():
             self.load()
 
     @property
@@ -289,7 +311,7 @@ class Confease:
     def _set_item(self, key: str, value: Any, origin: str, *, force: bool = False):
         """Set an item if allowed by precedence, or always when forced."""
         if self._entries is None:
-            self._initialize_entries()
+            self._ensure_entries()
         if self._entries is None:
             self._entries = []
 
@@ -308,7 +330,9 @@ class Confease:
 
         Validate all content and keys before replacing in-memory entries.
         Failed loads preserve the previous entries; defaults supply keys not
-        defined by the file.
+        defined by the file. Successful loading, including from an alternate
+        path, satisfies deferred initialization. With ``reload=False``, later
+        ordinary access keeps those entries rather than loading the destination.
 
         Args:
             path: Optional file path to load instead of the instance path.
@@ -339,6 +363,14 @@ class Confease:
     def _initialize_entries(self):
         """Initialize defaults in memory without invoking persistent reset."""
         self._entries = list(self._defaults)
+
+    def _ensure_entries(self):
+        """Initialize ordinary use from the destination or memory-only defaults."""
+        if self._entries is None:
+            if self._path is not None and self._path.exists():
+                self.load()
+            else:
+                self._initialize_entries()
     
     def _data_for_save(self, user_only: bool = True) -> dict[str, Any]:
         """Return nested mapping data for persistence."""
@@ -363,6 +395,9 @@ class Confease:
                 previous bytes before replacement. Backup failure aborts saving.
 
         Notes:
+            A deferred instance initializes from its existing destination before
+            saving, so unaccessed file values are retained. Initialization errors
+            abort saving without changing the file or publishing partial entries.
             Runtime-only configurations created without ``path`` are a no-op
             when saved. Existing YAML, TOML, INI-family, and XML comments are
             preserved using the latest destination document. Selected in-memory
@@ -370,23 +405,30 @@ class Confease:
             destinations or unrepresentable values raise without replacing the
             file. Complete candidates are validated before replacement.
         """
-        if self._path is None:
-            return
-
-        self._path.parent.mkdir(parents=True, exist_ok=True)
-        data = self._data_for_save(user_only)
-        if self._backup_enabled(backup):
-            self._parser.save(self._path, data, backup=True)
-        else:
-            self._parser.save(self._path, data)
+        previous = self._entries
+        try:
+            self._ensure_entries()
+            if self._path is None:
+                return
+            self._path.parent.mkdir(parents=True, exist_ok=True)
+            data = self._data_for_save(user_only)
+            if self._backup_enabled(backup):
+                self._parser.save(self._path, data, backup=True)
+            else:
+                self._parser.save(self._path, data)
+        except Exception:
+            if previous is None:
+                self._entries = previous
+            raise
 
     def reset(self, *, backup: bool | None = None):
-        """Restore keyword defaults in memory, or copy the template to disk.
+        """Restore ``items`` defaults in memory, or copy the template to disk.
 
         With a template, explicitly overwrite the configured path with exact
         template bytes and reload them as user-origin values. Validation or
         copy failures leave the previous file and in-memory entries unchanged.
-        Without a template, reset only memory and do not write the file.
+        Without a template, reset only memory and do not write the file. Reset
+        bypasses deferred destination loading, including for malformed files.
 
         Args:
             backup: Override the instance backup policy for template restoration.
@@ -424,7 +466,7 @@ class Confease:
                 draft_path.unlink()
 
         self._defaults = defaults
-        self.load()
+        self._entries = [Confitem(key, value, USR) for key, value in values.items()]
 
     def restore(self, path: str | Path | None = None, *, backup: bool | None = None):
         """Restore exact backup bytes while retaining existing defaults.
@@ -447,6 +489,8 @@ class Confease:
             Validation uses the active parser. Malformed or missing destinations
             can be recovered; failures preserve the destination and live entries.
             Defaults, template, configured path, and instance policy are unchanged.
+            Construct with ``autoload=False`` to recover a malformed destination
+            using a fresh instance without parsing it during construction.
         """
         if self._path is None:
             raise FileNotFoundError("No configuration path provided")
@@ -504,7 +548,7 @@ class Confease:
             names do not return an item; use ``get()`` for section snapshots.
         """
         if self._entries is None:
-            self._initialize_entries()
+            self._ensure_entries()
         elif self._reload:
             self.load()
         if self._entries is None:
@@ -536,6 +580,7 @@ class Confease:
             ValueError: If nested keys exceed one level or a scalar key collides
                 with a section key.
         """
+        self._ensure_entries()
         items = self._flatten_mapping({key: value})
         for item_key, item_value in items.items():
             self._set_item(item_key, item_value, USR, force=True)
@@ -555,7 +600,7 @@ class Confease:
         """
         self._validate_key(key)
         if self._entries is None:
-            self._initialize_entries()
+            self._ensure_entries()
         elif self._reload:
             self.load()
         previous = self._entries or []
@@ -617,6 +662,9 @@ class Confease:
             Exception: If the editor or installation fails.
 
         Notes:
+            With ``autoload=False``, a fresh instance can repair malformed text
+            without ordinary destination loading. Cancellation preserves deferred
+            state; successful installation satisfies initialization.
             Accepted candidates are retained with a recovery path in exception
             notes on installation failure. Missing-target installation refuses
             to overwrite a target created during editing. An explicitly assigned
@@ -722,6 +770,7 @@ class Confease:
             FileNotFoundError: If any file path does not exist.
             ValueError: If a file suffix, preference, or key shape is invalid.
         """
+        self._ensure_entries()
         if preference is not None:
             self.preference = preference
         self.reload_files(*files)
@@ -740,6 +789,7 @@ class Confease:
             FileNotFoundError: If a path does not exist.
             ValueError: If a suffix is unsupported or loaded keys collide.
         """
+        self._ensure_entries()
         for path in paths:
             load_path = Path(path).expanduser()
             if not load_path.exists():
@@ -760,6 +810,7 @@ class Confease:
             namespace: Parsed command-line namespace. Attribute names become
                 config keys, and nested dictionaries are flattened one level.
         """
+        self._ensure_entries()
         data = {key: value for key, value in vars(namespace).items() if value is not None}
         for key, value in self._flatten_mapping(data).items():
             self._set_item(key, value, CLI)
@@ -772,8 +823,7 @@ class Confease:
         ``true``, ``5432``, ``null``, or ``[1, 2]`` becomes the corresponding
         Python value.
         """
-        if self._entries is None:
-            self._initialize_entries()
+        self._ensure_entries()
         entries = self._entries or []
         for key in {entry.key for entry in entries}:
             if key in os.environ:

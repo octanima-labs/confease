@@ -18,7 +18,7 @@ def test_delete_null_leaf_and_section(tmp_path):
 
 
 def test_delete_default_does_not_create_tombstone(tmp_path):
-    conf = Confease(tmp_path / "settings.yaml", key="fallback")
+    conf = Confease(tmp_path / "settings.yaml", items={"key": "fallback"})
     assert conf.delete("key") is True
     assert conf.get_item("key") is None
     conf.reset()
@@ -52,7 +52,7 @@ def test_failed_autodelete_restores_entries(tmp_path, monkeypatch):
 
 
 def test_failed_initial_save_does_not_initialize_live_entries(tmp_path):
-    conf = Confease(tmp_path / "settings.yaml", value=object())
+    conf = Confease(tmp_path / "settings.yaml", items={"value": object()})
     with pytest.raises(RepresenterError):
         conf.save(user_only=False)
     assert conf._entries is None

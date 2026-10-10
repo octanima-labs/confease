@@ -160,13 +160,93 @@ args = parser.parse_args()
 
 conf = Confease(
     "~/.config/my-app/conf.yaml",
-    APP_DIR="~/Apps",
-    DEBUG=False,
-    database={"host": "localhost", "port": 5432},
+    items={
+        "APP_DIR": "~/Apps",
+        "DEBUG": False,
+        "database": {"host": "localhost", "port": 5432},
+    },
 )
 
 conf.load_sources(args, "/etc/my-app/conf.yaml")
 ```
+
+Pass in-code defaults through `items`, a dictionary supporting one-level nested
+sections. Omitted `items`, `items=None`, and `items={}` provide no defaults;
+other input types raise `TypeError`. Configuration keys can use any constructor
+option name, including `path`, `backup`, or `items`, without changing those options.
+Values retain their Python types and participate as default-origin entries.
+
+#### Constructor Migration
+
+The constructor now separates defaults from controls. Replace old calls as follows:
+
+```python
+# Before
+conf = Confease("settings.yaml", __backup__=True, DEBUG=False)
+
+# Now
+conf = Confease("settings.yaml", backup=True, items={"DEBUG": False})
+```
+
+Arbitrary configuration keywords and the legacy `__backup__` option are no longer
+accepted; they raise `TypeError`. The existing positional option order is retained,
+with `backup` in the former `__backup__` slot and `items` appended after it.
+
+#### Deferred Loading And Recovery
+
+By default, construction immediately loads an existing destination and reports
+invalid content. Use the keyword-only `autoload=False` option to bind a path
+without parsing it, writing files, creating directories, or taking backups:
+
+```python
+conf = Confease("settings.yaml", autoload=False, items={"retries": 3})
+```
+
+Parser, preference, defaults, and any configured template are still validated.
+The first ordinary read, assignment, deletion, save, or source overlay loads the
+existing destination; if it is missing, defaults initialize in memory. Source
+overlays include `reload_cli()`, `reload_env()`, `reload_files()`, and
+`load_sources()`. First-use loading preserves unrelated file values before a
+mutation or save. Invalid content blocks that operation without changing the
+file or initializing entries; retry after repairing the destination.
+
+Recovery operations bypass ordinary first-use loading, making these public
+patterns suitable for malformed destinations:
+
+```python
+# Repair exact destination text in the embedded editor
+conf = Confease("settings.yaml", autoload=False, backup=True)
+conf.edit_file()
+
+# Replace the destination with exact template bytes
+conf = Confease("settings.yaml", template="defaults.yaml", autoload=False)
+conf.reset(backup=True)
+
+# Recover the latest backup, or an explicit source
+conf = Confease("settings.yaml", autoload=False)
+conf.restore(backup=True)
+# conf.restore("historical.snapshot", backup=True)
+```
+
+Cancelled transactional editing and failed recovery preserve deferred state;
+a later ordinary read still tries to load the destination. Successful recovery
+or explicit `load(alternate_path)` initializes entries, so later access with
+`reload=False` keeps that state. Reset without a template deliberately initializes
+only defaults in memory, even if the destination is malformed.
+
+`autoload=False` also works with `reload=True`: first ordinary use initializes
+once, then established automatic-read and automatic-save behavior applies.
+First use of a missing destination can read defaults without creating it; later
+automatic reads require the configured file to exist.
+
+A configuration key named `autoload` remains independent of the loading option:
+
+```python
+conf = Confease(autoload=False, items={"autoload": "application-value"})
+conf["autoload"]  # "application-value"
+```
+
+Migrate former keyword defaults named `autoload` to `items={"autoload": value}`.
 
 Read values with `get()` or indexed access:
 
@@ -200,7 +280,7 @@ Concurrent-writer merging and locking are not provided.
 Enable backups for an instance or for a single operation:
 
 ```python
-conf = Confease("settings.yaml", __backup__=True)
+conf = Confease("settings.yaml", backup=True)
 conf.set("retries", 5)
 conf.save()                       # inherits the instance policy
 conf.save(backup=False)           # skips the snapshot for this save only
@@ -211,18 +291,18 @@ conf.restore()                   # latest matching sibling; inherits backup=True
 conf.restore("older.snapshot", backup=False)  # explicit source, any filename
 ```
 
-The constructor's `__backup__` option controls the instance policy; ordinary
-`backup=` remains a configuration default. Backups are disabled by default.
+The constructor's `backup` option controls the instance policy; a configuration
+default named `backup` belongs in `items`. Backups are disabled by default.
 On `save()`, `edit_file()`, `reset()`, and `restore()`, `backup=None`
 inherits the instance policy; `True` or `False` overrides that operation only.
-With `reload=True, __backup__=True`, every automatic save triggered by `set()`, indexed
+With `reload=True, backup=True`, every automatic save triggered by `set()`, indexed
 assignment, or a successful `delete()` snapshots the previous file. Memory-only
 operations and first writes to missing files have no previous document to back up.
 
 The policy and a config key named `backup` can coexist:
 
 ```python
-conf = Confease("settings.yaml", __backup__=True, backup="daily")
+conf = Confease("settings.yaml", backup=True, items={"backup": "daily"})
 conf.get("backup")               # "daily" as a default unless the file overrides it
 conf.save(backup=False)           # skips a snapshot; does not change the config key
 ```
@@ -321,7 +401,7 @@ Origins mean:
 - `ENV`: known environment variables loaded by `reload_env()`.
 - `SYS`: config files outside the current user home directory.
 - `USR`: config files inside the current user home directory and values assigned with `set()`.
-- `DEF`: keyword defaults or values read from a configured template.
+- `DEF`: defaults supplied through `items` or values read from a configured template.
 
 Customize precedence with `preference`:
 
@@ -342,7 +422,7 @@ export PORT=5432
 ```
 
 ```python
-conf = Confease(DEBUG=False, PORT=8000)
+conf = Confease(items={"DEBUG": False, "PORT": 8000})
 conf.reload_env()
 
 conf["DEBUG"] # True
@@ -378,7 +458,7 @@ in-memory values. It returns the same configuration instance after acceptance or
 cancellation:
 
 ```python
-conf = Confease("settings.yaml", retries=3)
+conf = Confease("settings.yaml", items={"retries": 3})
 conf.edit_file()
 ```
 
@@ -445,7 +525,7 @@ after acceptance, not before launch. Replace `edit_file(user_only=...)` with
 
 ## Templates And Reset
 
-Use a template instead of keyword defaults when defaults belong in a file:
+Use a template instead of `items` defaults when defaults belong in a file:
 
 ```python
 conf = Confease("conf.yaml", template="defaults.yaml")  # defaults.yaml must exist
@@ -453,7 +533,7 @@ conf.get("DEBUG")  # falls back to the template if absent from conf.yaml
 conf.reset()       # explicitly overwrites conf.yaml with exact template content
 ```
 
-Template values are `DEF` defaults in memory; initialization and reads do not copy them to the target. Explicit template-backed `reset()` validates the template, restores its exact bytes (including comments), and reloads the target as `USR` values. Missing or invalid templates leave the existing file and entries unchanged. Without a template, `reset()` resets keyword defaults only in memory.
+Template values are `DEF` defaults in memory; initialization and reads do not copy them to the target. Explicit template-backed `reset()` validates the template, restores its exact bytes (including comments), and reloads the target as `USR` values. Missing or invalid templates leave the existing file and entries unchanged. Without a template, `reset()` resets `items` defaults only in memory. A template cannot be combined with nonempty `items`; omitted, `None`, or empty `items` are allowed.
 
 See [configuration guidance](docs/configuration.md) for details.
 

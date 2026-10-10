@@ -16,9 +16,11 @@ args = parser.parse_args()
 
 conf = Confease(
     "~/.config/my-app/conf.yaml",
-    DEBUG=False,
-    LOG_LEVEL="INFO",
-    database={"host": "localhost", "port": 5432},
+    items={
+        "DEBUG": False,
+        "LOG_LEVEL": "INFO",
+        "database": {"host": "localhost", "port": 5432},
+    },
 )
 
 conf.load_sources(args, "/etc/my-app/conf.yaml")
@@ -31,7 +33,7 @@ If `--debug` is provided, the CLI-origin value wins over values from environment
 Values assigned with `set()` or indexed assignment are user-origin values. By default, `save()` writes only user-origin values:
 
 ```python
-conf = Confease("~/.config/my-app/conf.yaml", THEME="light")
+conf = Confease("~/.config/my-app/conf.yaml", items={"THEME": "light"})
 
 conf["THEME"] = "dark"
 conf.save()
@@ -62,7 +64,7 @@ Create a configuration object without a path when persistence is not needed:
 ```python
 from confease import Confease
 
-conf = Confease(DEBUG=False)
+conf = Confease(items={"DEBUG": False})
 conf["DEBUG"] = True
 ```
 
@@ -73,7 +75,7 @@ Calling `save()` on a runtime-only configuration does not write a file.
 Nested sections can be read as plain dictionaries:
 
 ```python
-conf = Confease(database={"host": "localhost", "port": 5432})
+conf = Confease(items={"database": {"host": "localhost", "port": 5432}})
 
 database = conf["database"]
 host = database["host"]
@@ -92,7 +94,7 @@ Let a user edit exact document text transactionally while keeping fallback defau
 ```python
 from confease import Confease
 
-conf = Confease("~/.config/my-app/conf.yaml", THEME="light")
+conf = Confease("~/.config/my-app/conf.yaml", items={"THEME": "light"})
 conf.edit_file()
 ```
 

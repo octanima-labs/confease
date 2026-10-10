@@ -27,7 +27,7 @@ def test_template_draft_requires_save_and_preserves_exact_bytes(tmp_path, save):
     template = tmp_path / "defaults.yaml"
     initial = b'# Header\r\nKEY: "template" # inline\r\n'
     template.write_bytes(initial)
-    conf = Confease(target, __backup__=True, DEFAULT="memory")
+    conf = Confease(target, backup=True, items={"DEFAULT": "memory"})
     conf.set("KEY", "unsaved")
     previous = conf._entries
 
@@ -65,7 +65,7 @@ def test_failed_template_edit_preserves_target_memory_and_saved_work(tmp_path, m
     target = tmp_path / "settings.yaml"
     template = tmp_path / "defaults.yaml"
     template.write_text("KEY: template\n")
-    conf = Confease(target, KEY="memory")
+    conf = Confease(target, items={"KEY": "memory"})
     previous = conf._entries
 
     def edit(draft):
@@ -197,7 +197,7 @@ def test_real_native_editor_has_modified_target_buffer(tmp_path, monkeypatch, ex
     template = tmp_path / "template ' | % defaults.yaml"
     initial = b'# Header\r\nKEY: "template" # inline\r\n'
     template.write_bytes(initial)
-    conf = Confease(target, KEY="memory")
+    conf = Confease(target, items={"KEY": "memory"})
     conf.editor = TextEditor(f"{executable} -u NONE -n -es")
     original_run = subprocess.run
 

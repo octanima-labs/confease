@@ -25,7 +25,7 @@ def test_restore_retains_source_defaults_template_and_policy(tmp_path):
     path.write_text("key: current\n")
     template = tmp_path / "template.yaml"
     template.write_text("key: default\nfallback: 3\n")
-    conf = Confease(path, template=template, __backup__=True)
+    conf = Confease(path, template=template, backup=True)
     defaults = conf._defaults
     source = tmp_path / "elsewhere" / "recovery.snapshot"
     source.parent.mkdir()
@@ -65,7 +65,7 @@ def test_restore_uses_active_parser_not_backup_extension(tmp_path, parser, suffi
 @pytest.mark.parametrize("existing", [False, True])
 def test_recover_missing_or_malformed_destination(tmp_path, existing):
     path = tmp_path / "settings.yaml"
-    conf = Confease(path, __backup__=True, fallback=1)
+    conf = Confease(path, backup=True, items={"fallback": 1})
     if existing:
         path.write_text("key: [\n")
     source = tmp_path / "settings-20261006-143052.yaml.bkp"
@@ -83,7 +83,7 @@ def test_recover_missing_or_malformed_destination(tmp_path, existing):
 def test_invalid_latest_source_preserves_live_state_without_fallback(tmp_path, content):
     path = tmp_path / "settings.yaml"
     path.write_text("key: current\n")
-    conf = Confease(path, __backup__=True, key="default")
+    conf = Confease(path, backup=True, items={"key": "default"})
     previous = conf._entries
     (tmp_path / "settings-20261006-143052.yaml.bkp").write_text("key: older\n")
     latest = tmp_path / "settings-20261007-143052.yaml.bkp"
@@ -98,7 +98,7 @@ def test_invalid_latest_source_preserves_live_state_without_fallback(tmp_path, c
 
 def test_missing_source_or_target_path(tmp_path):
     path = tmp_path / "settings.yaml"
-    conf = Confease(path, __backup__=True, key=1)
+    conf = Confease(path, backup=True, items={"key": 1})
     for source in (None, tmp_path / "absent"):
         with pytest.raises(FileNotFoundError):
             conf.restore(source)
@@ -106,7 +106,7 @@ def test_missing_source_or_target_path(tmp_path):
     assert list(tmp_path.iterdir()) == []
     source = tmp_path / "source"
     source.write_text("key: 1\n")
-    runtime = Confease(__backup__=True, key=2)
+    runtime = Confease(backup=True, items={"key": 2})
     previous = runtime.get_item("key")
     with pytest.raises(FileNotFoundError, match="path"):
         runtime.restore(source)
@@ -119,7 +119,7 @@ def test_repeated_restore_toggles_same_second(tmp_path, frozen_time):
     path.write_bytes(a)
     source = create_backup(path)
     path.write_bytes(b)
-    conf = Confease(path, __backup__=True)
+    conf = Confease(path, backup=True)
     for expected in (a, b, a, b):
         conf.restore()
         assert path.read_bytes() == expected
@@ -136,7 +136,7 @@ def test_restore_policy_overrides(tmp_path, policy, override, count):
     path.write_text("key: current\n")
     source = tmp_path / "historical"
     source.write_text("key: historical\n")
-    conf = Confease(path, __backup__=policy)
+    conf = Confease(path, backup=policy)
     conf.restore(source, backup=override)
     assert len(list(tmp_path.glob("*.bkp"))) == count
     assert conf._backup is policy
@@ -148,7 +148,7 @@ def test_restore_failures_preserve_file_and_entries(tmp_path, monkeypatch, stage
     path.write_text("key: current\n")
     source = tmp_path / "historical"
     source.write_text("key: old\n")
-    conf = Confease(path, __backup__=True)
+    conf = Confease(path, backup=True)
     previous = conf._entries
 
     def fail(*args, **kwargs):

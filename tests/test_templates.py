@@ -102,10 +102,10 @@ def test_runtime_only_template_defaults_and_reset(tmp_path):
     assert conf._entries == previous
 
 
-def test_keyword_default_reset_does_not_write_file(tmp_path):
+def test_items_default_reset_does_not_write_file(tmp_path):
     path = tmp_path / "conf.yaml"
     path.write_text("KEY: persisted\n")
-    conf = Confease(path, KEY="default")
+    conf = Confease(path, items={"KEY": "default"})
     conf.reset()
     assert conf.get_item("KEY") == Confitem("KEY", "default", DEF)
     assert path.read_text() == "KEY: persisted\n"

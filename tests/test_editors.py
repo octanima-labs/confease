@@ -55,7 +55,7 @@ def test_edit_file_keeps_invalid_save_and_previous_memory(tmp_path, content):
 
 def test_edit_file_persists_valid_user_config_edits(tmp_path):
     path = tmp_path / "conf.yaml"
-    conf = Confease(path, DEFAULT="default")
+    conf = Confease(path, items={"DEFAULT": "default"})
     conf.set("USER", "old")
     content = "# Saved by user\nUSER: new # keep this\n"
     conf.editor = WritingEditor(content)
@@ -72,7 +72,7 @@ def test_edit_file_persists_valid_user_config_edits(tmp_path):
 def test_edit_file_missing_target_requires_manual_save(tmp_path, save):
     path = tmp_path / "nested" / "conf.yaml"
     editor = WritingEditor("KEY: edited\n" if save else None)
-    conf = Confease(path, KEY="default")
+    conf = Confease(path, items={"KEY": "default"})
     conf.editor = editor
 
     assert conf.edit_file() is conf
