@@ -9,7 +9,7 @@ sys.path.insert(0, str(ROOT / "src"))
 project = "confease"
 author = "octanima-labs"
 copyright = "2026, octanima-labs"
-release = "4.0.0"
+release = "5.0.0"
 
 extensions = [
     "myst_parser",

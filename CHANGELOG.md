@@ -7,6 +7,24 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## [5.0.0] - 2026-10-10
+
+### Added
+
+- Support arbitrary-depth configuration mappings and dotted paths across defaults, assignments, source overlays, recursive section snapshots, and subtree deletion while retaining per-leaf source origins and precedence.
+- Preserve empty mappings as present configuration values with origins, including during origin-filtered saves and round trips through every built-in format. Lists containing mappings remain whole values without indexed configuration paths.
+- Support reversible deep hierarchy using native YAML, JSON, and TOML mappings, recursive XML sections, dotted INI-family section names, and full dotted CSV row keys.
+
+### Changed
+
+- Extend comment-preserving writes to deep configuration paths and mixed dotted/native document layouts, retaining annotations on surviving leaves, sections, and siblings during updates and deletion.
+- Keep type-sensitive candidate validation and explicit failures for values unsupported by the destination format, including TOML nulls, without silently stringifying values or introducing marker encodings.
+
+### Breaking Changes
+
+- All built-in parser loaders now return canonical nested mappings, interpreting dots in configuration keys as path separators. Direct `Csv.load()` callers must replace flat access such as `data["database.host"]` with `data["database"]["host"]`; dotted lookups through `Confease` remain supported.
+- Reject duplicate logical paths and scalar/section conflicts at any depth instead of silently overwriting values. Remove duplicate definitions or conflicting ancestors before loading affected files; empty path segments remain invalid.
+
 ## [4.0.0] - 2026-10-10
 
 ### Added
