@@ -113,7 +113,7 @@ def test_cli_backup_failure_preserves_target(tmp_path, monkeypatch, capsys, oper
 
 @pytest.mark.parametrize("existing", [False, True])
 @pytest.mark.parametrize("flag", ["-b", "--backup"])
-def test_restore_missing_or_malformed_destination(tmp_path, existing, flag, no_editor):
+def test_restore_missing_or_malformed_destination(tmp_path, existing, flag, no_editor, capsys):
     path = tmp_path / "settings.yaml"
     original = b"key: [\r\n"
     if existing:
@@ -122,6 +122,9 @@ def test_restore_missing_or_malformed_destination(tmp_path, existing, flag, no_e
     restored = b"key: restored # inline\r\n"
     source.write_bytes(restored)
     assert main(["restore", str(path), flag]) == 0
+    output = capsys.readouterr()
+    assert output.out == ""
+    assert output.err == ""
     assert path.read_bytes() == restored == source.read_bytes()
     others = [p for p in tmp_path.glob("*.bkp") if p != source]
     assert len(others) == int(existing)

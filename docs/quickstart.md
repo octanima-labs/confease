@@ -13,9 +13,11 @@ args = parser.parse_args()
 
 CONF = Confease(
     "~/.config/my-app/conf.yaml",
-    APP_DIR="~/Apps",
-    DEBUG=False,
-    database={"host": "localhost", "port": 5432},
+    items={
+        "APP_DIR": "~/Apps",
+        "DEBUG": False,
+        "database": {"host": "localhost", "port": 5432},
+    },
 )
 
 CONF.load_sources(args, "/etc/my-app/conf.yaml")

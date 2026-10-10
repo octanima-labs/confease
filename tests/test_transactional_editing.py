@@ -25,7 +25,7 @@ def test_cancel_keeps_destination_and_unsaved_memory(tmp_path, monkeypatch, exis
     path = tmp_path / "settings.yaml"
     if existing:
         path.write_bytes(b"key: old\r\n")
-    conf = Confease(path, __backup__=True, fallback=1)
+    conf = Confease(path, backup=True, items={"fallback": 1})
     conf.set("key", "unsaved")
     previous = conf._entries
     assert isinstance(conf.editor, TuiEditor)
@@ -54,7 +54,7 @@ def test_accept_validates_before_backup_and_preserves_exact_text(tmp_path, monke
     original = b"# original\r\nkey: old\r\n"
     accepted = '# edited\r\nkey: "new" # inline'
     path.write_bytes(original)
-    conf = Confease(path, __backup__=True, fallback=1)
+    conf = Confease(path, backup=True, items={"fallback": 1})
     previous = conf._entries
 
     def edit(text, *, title, validator):
@@ -86,7 +86,7 @@ def test_template_acceptance_is_explicit_and_keeps_defaults(tmp_path, monkeypatc
     defaults = tmp_path / "defaults.yaml"
     defaults.write_text("key: default\nother: retained\n")
     path = tmp_path / "nested" / "settings.yaml"
-    conf = Confease(path, template=defaults, __backup__=True)
+    conf = Confease(path, template=defaults, backup=True)
     conf.set("key", "unsaved")
     previous = conf._entries
     previous_defaults = conf._defaults
@@ -116,7 +116,7 @@ def test_bad_template_prevents_session(tmp_path, monkeypatch, problem):
     template = tmp_path / "template.yaml"
     if problem != "missing":
         template.write_text("key: [\n" if problem == "invalid" else "key.child: 1\n")
-    conf = Confease(tmp_path / "settings.yaml", key="default")
+    conf = Confease(tmp_path / "settings.yaml", items={"key": "default"})
     monkeypatch.setattr(conf.editor, "edit", lambda *args, **kwargs: pytest.fail("must not launch"))
     with pytest.raises((FileNotFoundError, ValueError, yaml.YAMLError)):
         conf.edit_file(template=template)
@@ -124,7 +124,7 @@ def test_bad_template_prevents_session(tmp_path, monkeypatch, problem):
 
 
 def test_validator_checks_default_collisions_without_mutation(tmp_path, monkeypatch):
-    conf = Confease(tmp_path / "settings.yaml", key="default")
+    conf = Confease(tmp_path / "settings.yaml", items={"key": "default"})
     previous = conf._entries
 
     def edit(text, *, title, validator):
@@ -142,7 +142,7 @@ def test_install_failure_retains_accepted_text_and_memory(tmp_path, monkeypatch,
     path = tmp_path / "settings.yaml"
     if failure != "concurrent":
         path.write_bytes(b"key: old\r\n")
-    conf = Confease(path, __backup__=True)
+    conf = Confease(path, backup=True)
     previous = conf._entries
 
     def edit(text, **kwargs):
@@ -172,7 +172,7 @@ def test_install_failure_retains_accepted_text_and_memory(tmp_path, monkeypatch,
 
 def test_accept_empty_buffer_creates_empty_yaml(tmp_path, monkeypatch):
     path = tmp_path / "settings.yaml"
-    conf = Confease(path, fallback=1)
+    conf = Confease(path, items={"fallback": 1})
     monkeypatch.setattr(conf.editor, "edit", lambda text, **kwargs: EditResult("accepted", ""))
     conf.edit_file()
     assert path.read_bytes() == b""

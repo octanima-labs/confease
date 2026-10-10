@@ -142,8 +142,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser = resolve_format(path, options.format, initializing=initializing)
         if options.command == "restore":
             # Recovery must not load a potentially malformed destination first.
-            conf = Confease(parser=parser)
-            conf._path = path
+            conf = Confease(path, parser=parser, autoload=False)
             conf.restore(options.source, backup=options.backup)
         elif not initializing and (options.update or options.delete):
             scripted_edit(path, parser, options.update, options.delete, backup=options.backup)

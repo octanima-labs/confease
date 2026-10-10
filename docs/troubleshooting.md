@@ -17,7 +17,7 @@ Use the default behavior when your application should keep built-in defaults in 
 `reload_env()` only loads environment variables for keys that are already known from defaults or loaded files. Add a default or load a file containing the key before calling `reload_env()`:
 
 ```python
-conf = Confease(DEBUG=False)
+conf = Confease(items={"DEBUG": False})
 conf.reload_env()
 ```
 

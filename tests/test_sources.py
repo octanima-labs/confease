@@ -52,7 +52,7 @@ def test_reload_env_loads_known_keys_only_and_parses_yaml_values(monkeypatch):
     monkeypatch.setenv("PORT", "5432")
     monkeypatch.setenv("ENABLED", "true")
     monkeypatch.setenv("UNKNOWN", "ignored")
-    conf = Confease(PORT=1, ENABLED=False)
+    conf = Confease(items={"PORT": 1, "ENABLED": False})
 
     conf.reload_env()
 
@@ -62,7 +62,7 @@ def test_reload_env_loads_known_keys_only_and_parses_yaml_values(monkeypatch):
 
 
 def test_reload_cli_skips_none_values_and_flattens_nested_values():
-    conf = Confease(OPTION="default")
+    conf = Confease(items={"OPTION": "default"})
 
     conf.reload_cli(Namespace(OPTION=None, OTHER="cli", database={"host": "localhost"}))
 
@@ -74,7 +74,7 @@ def test_reload_cli_skips_none_values_and_flattens_nested_values():
 def test_load_sources_accepts_readme_style_paths_and_cli_wins_by_default(tmp_path):
     path = tmp_path / "conf.yaml"
     path.write_text("KEY: file\n")
-    conf = Confease(KEY="default")
+    conf = Confease(items={"KEY": "default"})
 
     conf.load_sources(Namespace(KEY="cli"), path)
 
@@ -83,7 +83,7 @@ def test_load_sources_accepts_readme_style_paths_and_cli_wins_by_default(tmp_pat
 
 def test_load_sources_custom_preference_can_make_env_win(monkeypatch):
     monkeypatch.setenv("KEY", "env")
-    conf = Confease(KEY="default")
+    conf = Confease(items={"KEY": "default"})
 
     conf.load_sources(Namespace(KEY="cli"), preference=[ENV, CLI, DEF])
 
@@ -92,7 +92,7 @@ def test_load_sources_custom_preference_can_make_env_win(monkeypatch):
 
 def test_load_sources_keeps_existing_preference_when_not_overridden(monkeypatch):
     monkeypatch.setenv("KEY", "env")
-    conf = Confease(KEY="default", preference=[DEF, CLI, ENV])
+    conf = Confease(items={"KEY": "default"}, preference=[DEF, CLI, ENV])
 
     conf.load_sources(Namespace(KEY="cli"))
 
@@ -109,7 +109,7 @@ def test_load_sources_applies_default_precedence_across_all_origins(tmp_path, mo
     user_path = home / "conf.yaml"
     system_path.write_text("KEY: system\n")
     user_path.write_text("KEY: user\n")
-    conf = Confease(KEY="default")
+    conf = Confease(items={"KEY": "default"})
 
     conf.load_sources(Namespace(KEY="cli"), system_path, user_path)
 
@@ -119,7 +119,7 @@ def test_load_sources_applies_default_precedence_across_all_origins(tmp_path, mo
 def test_reload_files_raises_when_source_keys_collide_with_existing_sections(tmp_path):
     path = tmp_path / "conf.yaml"
     path.write_text("database: sqlite\n")
-    conf = Confease(database={"host": "localhost"})
+    conf = Confease(items={"database": {"host": "localhost"}})
 
     with pytest.raises(ValueError, match="collides"):
         conf.reload_files(path)

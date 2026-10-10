@@ -10,7 +10,7 @@ The supported origins are:
 - `ENV`: environment variables loaded by `reload_env()`.
 - `SYS`: config files outside the current user's home directory.
 - `USR`: config files inside the current user's home directory and values assigned with `set()`.
-- `DEF`: keyword defaults or values read from a configured template.
+- `DEF`: defaults supplied through `items` or values read from a configured template.
 
 By default, precedence is ordered from highest to lowest priority:
 
@@ -47,21 +47,39 @@ Origins omitted from the preference list are appended after the origins you prov
 
 ## Defaults
 
-Defaults are passed as keyword arguments:
+Defaults are passed in the `items` dictionary:
 
 ```python
 conf = Confease(
-    DEBUG=False,
-    PORT=8000,
-    database={"host": "localhost", "port": 5432},
+    items={
+        "DEBUG": False,
+        "PORT": 8000,
+        "database": {"host": "localhost", "port": 5432},
+    },
 )
 ```
 
 Defaults are memory-only unless explicitly saved. By default, `save()` writes only user-origin entries. Use `save(user_only=False)` to write all current entries, including defaults and loaded overrides.
 
+Omitted `items`, `items=None`, and `items={}` provide no defaults. Other input types
+raise `TypeError`. Configuration keys can use any constructor option name:
+
+```python
+conf = Confease(
+    "settings.yaml",
+    backup=True,
+    items={"backup": "daily", "path": "/srv/data", "items": "application-value"},
+)
+conf["backup"]  # "daily", independently of the enabled backup policy
+```
+
+For the constructor migration, replace `Confease(DEBUG=False)` with
+`Confease(items={"DEBUG": False})`, and replace `__backup__=True` with `backup=True`.
+The old constructor keywords raise `TypeError`; there is no legacy alias.
+
 ### Templates And Explicit Reset
 
-Alternatively, provide an existing template file instead of keyword defaults:
+Alternatively, provide an existing template file instead of `items` defaults:
 
 ```python
 conf = Confease("settings.yaml", template="defaults.yaml")
@@ -77,7 +95,49 @@ conf.reset()
 
 With a template, this is a destructive restore: it validates the template, copies its exact bytes over the configured path, and reloads the restored values as `USR`. Comments, formatting, and key order are preserved. Missing parent directories are created. Missing or invalid templates and copy failures leave prior file content and entries unchanged.
 
-Template restoration requires a configured target path; a template-backed runtime-only instance raises `FileNotFoundError` on `reset()`. Without a template, `reset()` only restores keyword defaults in memory and does not write or delete a file. Templates cannot be combined with keyword defaults.
+Template restoration requires a configured target path; a template-backed runtime-only instance raises `FileNotFoundError` on `reset()`. Without a template, `reset()` only restores `items` defaults in memory and does not write or delete a file. Templates cannot be combined with nonempty `items`; omitted, `None`, or empty `items` are allowed.
+
+## Deferred Loading And Recovery
+
+Construction normally loads an existing destination immediately. The keyword-only
+`autoload=False` option binds the destination without parsing it or creating any
+files, directories, or backups. Parser, preference, `items`, and configured
+template validation still occur.
+
+The first ordinary operation loads an existing destination or initializes defaults
+if it is absent. This includes reads, indexed access, `set()`, `delete()`, `save()`,
+and all source-overlay methods. Unrelated destination values initialize before a
+mutation or save; known file keys are available for environment overlays. Failed
+loading leaves deferred state intact and can be retried after external repair.
+
+Recovery bypasses ordinary initialization:
+
+```python
+conf = Confease("settings.yaml", autoload=False, backup=True)
+conf.edit_file()  # repair exact malformed text transactionally
+
+conf = Confease("settings.yaml", template="defaults.yaml", autoload=False)
+conf.reset(backup=True)  # install exact validated template bytes
+
+conf = Confease("settings.yaml", autoload=False)
+conf.restore(backup=True)  # latest matching backup
+# conf.restore("historical.snapshot", backup=True)  # explicit source
+```
+
+Cancellation or failed recovery preserves deferred state and original content.
+Successful recovery or explicit `load(alternate_path)` establishes initialized
+entries; later ordinary access with `reload=False` does not load over them. Without
+a template, `reset()` deliberately initializes defaults without reading the target.
+
+With `reload=True`, first ordinary use initializes once and later operations retain
+their automatic reload/save behavior. A missing target supplies defaults on first
+use without being created; subsequent automatic reads require the target to exist.
+
+Keep application defaults named `autoload` in `items`, independently of the option:
+
+```python
+conf = Confease(autoload=False, items={"autoload": "application-value"})
+```
 
 ## Environment Variables
 
@@ -89,7 +149,7 @@ export PORT=5432
 ```
 
 ```python
-conf = Confease(DEBUG=False, PORT=8000)
+conf = Confease(items={"DEBUG": False, "PORT": 8000})
 conf.reload_env()
 
 conf["DEBUG"]
@@ -121,7 +181,7 @@ conf["database.host"]
 Call `save()` to persist configuration back to the path configured on the `Confease` instance:
 
 ```python
-conf = Confease("~/.config/my-app/conf.yaml", DEBUG=False)
+conf = Confease("~/.config/my-app/conf.yaml", items={"DEBUG": False})
 conf.set("DEBUG", True)
 conf.save()
 ```
@@ -200,7 +260,7 @@ Use `edit_file()` when you want users or maintainers to edit the configured file
 ```python
 from confease import Confease
 
-conf = Confease("~/.config/my-app/conf.yaml", DEBUG=False)
+conf = Confease("~/.config/my-app/conf.yaml", items={"DEBUG": False})
 conf.edit_file()
 ```
 

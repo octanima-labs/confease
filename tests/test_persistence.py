@@ -13,7 +13,7 @@ from confease import CLI, DEF, USR, Confease, Confitem, Csv, Ini, Json, Toml, Xm
 def test_failed_load_preserves_previous_entries(tmp_path, content):
     path = tmp_path / "conf.yaml"
     path.write_text("KEY: original\n")
-    conf = Confease(path, DEFAULT="fallback")
+    conf = Confease(path, items={"DEFAULT": "fallback"})
     conf.set("UNSAVED", 42)
     previous = list(conf._entries)
     path.write_text(content)
@@ -28,7 +28,7 @@ def test_failed_load_preserves_previous_entries(tmp_path, content):
 
 def test_failed_load_with_default_collision_preserves_entries(tmp_path):
     path = tmp_path / "conf.yaml"
-    conf = Confease(path, database={"host": "default"})
+    conf = Confease(path, items={"database": {"host": "default"}})
     conf.set("KEY", "original")
     previous = list(conf._entries)
     path.write_text("database: scalar\n")
@@ -43,7 +43,7 @@ def test_existing_yaml_file_loads_on_init_with_defaults(tmp_path):
     path = tmp_path / "conf.yaml"
     path.write_text("APP_DIR: /tmp/app\nNUMBER: 3\n")
 
-    conf = Confease(path, APP_DIR="~/Apps", OTHER="default")
+    conf = Confease(path, items={"APP_DIR": "~/Apps", "OTHER": "default"})
 
     assert conf.get_item("APP_DIR") == Confitem("APP_DIR", "/tmp/app", USR)
     assert conf.get_item("NUMBER") == Confitem("NUMBER", 3, USR)
@@ -52,7 +52,7 @@ def test_existing_yaml_file_loads_on_init_with_defaults(tmp_path):
 
 def test_missing_yaml_file_uses_defaults_without_creating_file(tmp_path):
     path = tmp_path / "missing.yaml"
-    conf = Confease(path, KEY="default")
+    conf = Confease(path, items={"KEY": "default"})
 
     assert conf.get("KEY") == "default"
     assert not path.exists()
@@ -60,7 +60,7 @@ def test_missing_yaml_file_uses_defaults_without_creating_file(tmp_path):
 
 def test_save_writes_only_user_entries(tmp_path):
     path = tmp_path / "conf.yaml"
-    conf = Confease(path, DEFAULT="default")
+    conf = Confease(path, items={"DEFAULT": "default"})
 
     conf.set("USER", "value")
     conf.save()
@@ -70,7 +70,7 @@ def test_save_writes_only_user_entries(tmp_path):
 
 def test_save_can_write_default_entries_when_user_only_is_false(tmp_path):
     path = tmp_path / "conf.yaml"
-    conf = Confease(path, DEFAULT="default")
+    conf = Confease(path, items={"DEFAULT": "default"})
 
     conf.save(user_only=False)
 
@@ -79,7 +79,7 @@ def test_save_can_write_default_entries_when_user_only_is_false(tmp_path):
 
 def test_save_can_write_entries_from_all_origins(tmp_path):
     path = tmp_path / "conf.yaml"
-    conf = Confease(path, DEFAULT="default")
+    conf = Confease(path, items={"DEFAULT": "default"})
 
     conf.set("USER", "value")
     conf._set_item("CLI_VALUE", "cli", CLI)
@@ -94,7 +94,7 @@ def test_save_can_write_entries_from_all_origins(tmp_path):
 
 def test_save_can_write_nested_entries_from_all_origins(tmp_path):
     path = tmp_path / "conf.yaml"
-    conf = Confease(path, database={"host": "default"})
+    conf = Confease(path, items={"database": {"host": "default"}})
 
     conf.set("database.port", 5432)
     conf.save(user_only=False)
@@ -116,7 +116,7 @@ def test_empty_yaml_file_loads_defaults(tmp_path):
     path = tmp_path / "empty.yaml"
     path.write_text("")
 
-    conf = Confease(path, KEY="default")
+    conf = Confease(path, items={"KEY": "default"})
 
     assert conf.get_item("KEY") == Confitem("KEY", "default", DEF)
 

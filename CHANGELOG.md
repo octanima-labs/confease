@@ -7,6 +7,22 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## [4.0.0] - 2026-10-10
+
+### Added
+
+- Add keyword-only `Confease(..., autoload=False)` for deferred destination loading. First ordinary reads, mutations, saves, and source overlays initialize existing file values before use; failed loads preserve uninitialized state for retry. Default construction remains eager, and deferred loading interoperates with `reload=True`.
+- Support public fresh-instance repair, template reset, and backup restore over malformed destinations without an initial parse. Successful recovery initializes entries; cancelled editing and failed recovery preserve deferred state. Configuration defaults named `autoload` use `items` independently of the loading option.
+
+### Changed
+
+- Use destination-bound deferred construction in CLI restore instead of private path mutation, removing its runtime-only diagnostic.
+
+### Breaking Changes
+
+- Replace arbitrary `Confease` constructor keyword defaults with `items: dict | None = None`. Migrate `Confease(DEBUG=False)` to `Confease(items={"DEBUG": False})`. Configuration keys can now use any constructor option name without collisions; non-dictionary, non-`None` items raise `TypeError`.
+- Rename constructor `__backup__` to `backup`, without a legacy alias. Migrate `Confease(__backup__=True, backup="daily")` to `Confease(backup=True, items={"backup": "daily"})`. Templates remain incompatible with nonempty defaults, but accept omitted, `None`, or empty `items`.
+
 ## [3.0.0] - 2026-10-10
 
 ### Added

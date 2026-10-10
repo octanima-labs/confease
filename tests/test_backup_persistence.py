@@ -21,7 +21,7 @@ def test_default_policy_and_save_overrides(tmp_path):
     assert len(snapshots(path)) == 1
     conf.save()
     assert len(snapshots(path)) == 1
-    protected = Confease(path, __backup__=True)
+    protected = Confease(path, backup=True)
     assert protected.get("backup") is None
     protected.save(backup=False)
     assert len(snapshots(path)) == 1
@@ -33,7 +33,7 @@ def test_default_policy_and_save_overrides(tmp_path):
 def test_constructor_policy_is_independent_of_backup_config_default(tmp_path, policy):
     path = tmp_path / "settings.yaml"
     path.write_text("key: 1\n")
-    conf = Confease(path, __backup__=policy, backup="daily")
+    conf = Confease(path, backup=policy, items={"backup": "daily"})
     assert conf.get("backup") == "daily"
     assert conf.get_item("backup").origin == DEF
     assert conf.get("__backup__") is None
@@ -47,10 +47,10 @@ def test_constructor_policy_is_independent_of_backup_config_default(tmp_path, po
     assert Yaml.load(path) == {"backup": "daily", "key": 1}
 
 
-def test_plain_backup_keyword_remains_a_default_without_enabling_policy(tmp_path):
+def test_backup_item_remains_a_default_without_enabling_policy(tmp_path):
     path = tmp_path / "settings.yaml"
     path.write_text("key: 1\n")
-    conf = Confease(path, backup=True)
+    conf = Confease(path, items={"backup": True})
     assert conf.get("backup") is True
     assert conf.get_item("backup").origin == DEF
     conf.save()
@@ -60,7 +60,7 @@ def test_plain_backup_keyword_remains_a_default_without_enabling_policy(tmp_path
 def test_automatic_saves_snapshot_each_previous_document(tmp_path):
     path = tmp_path / "settings.yaml"
     path.write_text("key: 1\nremove: null\n")
-    conf = Confease(path, reload=True, __backup__=True)
+    conf = Confease(path, reload=True, backup=True)
     originals = []
     originals.append(path.read_bytes())
     conf.set("key", 2)
@@ -74,11 +74,11 @@ def test_automatic_saves_snapshot_each_previous_document(tmp_path):
 
 
 def test_memory_only_and_missing_destinations(tmp_path):
-    conf = Confease(__backup__=True, key=1)
+    conf = Confease(backup=True, items={"key": 1})
     conf.save()
     conf.reset()
     path = tmp_path / "new.yaml"
-    conf = Confease(path, __backup__=True, key=1)
+    conf = Confease(path, backup=True, items={"key": 1})
     conf.reset()
     assert not path.exists()
     conf.save(user_only=False)
@@ -99,7 +99,7 @@ def test_all_formats_preserve_original_and_filter_origins(tmp_path, parser, suff
     path = tmp_path / f"settings{suffix}"
     original = text.encode()
     path.write_bytes(original)
-    conf = Confease(path, parser=parser, __backup__=True, fallback=1)
+    conf = Confease(path, parser=parser, backup=True, items={"fallback": 1})
     conf.set("key", "new")
     conf._set_item("cli_only", True, CLI)
     conf.save()
@@ -117,7 +117,7 @@ def test_template_reset_backup_and_exact_copy(tmp_path, override, count):
     template_bytes = b'# header\r\nkey: "default" # inline\r\n'
     path.write_bytes(original)
     template.write_bytes(template_bytes)
-    conf = Confease(path, template=template, __backup__=True)
+    conf = Confease(path, template=template, backup=True)
     conf.reset(backup=override)
     assert path.read_bytes() == template_bytes
     assert len(snapshots(path)) == count
@@ -129,7 +129,7 @@ def test_reset_missing_target_has_no_backup(tmp_path):
     template = tmp_path / "template.yaml"
     template.write_text("key: default\n")
     path = tmp_path / "settings.yaml"
-    Confease(path, template=template, __backup__=True).reset()
+    Confease(path, template=template, backup=True).reset()
     assert snapshots(path) == []
 
 
@@ -137,7 +137,7 @@ def test_reset_missing_target_has_no_backup(tmp_path):
 def test_direct_editor_snapshot_precedes_launch(tmp_path, monkeypatch, override, count):
     path = tmp_path / "settings.yaml"
     path.write_bytes(b"key: original\r\n")
-    conf = Confease(path, __backup__=True)
+    conf = Confease(path, backup=True)
     previous = conf._entries
 
     from confease import TextEditor
@@ -159,7 +159,7 @@ def test_direct_editor_snapshot_precedes_launch(tmp_path, monkeypatch, override,
 
 def test_direct_editor_missing_target_and_unchanged_snapshot(tmp_path, monkeypatch):
     path = tmp_path / "settings.yaml"
-    conf = Confease(path, __backup__=True)
+    conf = Confease(path, backup=True)
     from confease import TextEditor
     conf.editor = TextEditor()
     monkeypatch.setattr(conf.editor, "open", lambda target: None)
@@ -177,7 +177,7 @@ def test_backup_failure_prevents_mutation_or_editor(tmp_path, monkeypatch, opera
     template = tmp_path / "template.yaml"
     path.write_text("key: original\n")
     template.write_text("key: default\n")
-    conf = Confease(path, template=template, __backup__=True)
+    conf = Confease(path, template=template, backup=True)
     conf.set("key", "unsaved")
     previous = conf._entries.copy()
     from confease import TextEditor
@@ -203,7 +203,7 @@ def test_backup_failure_prevents_mutation_or_editor(tmp_path, monkeypatch, opera
 def test_invalid_candidates_do_not_create_backups(tmp_path):
     path = tmp_path / "settings.toml"
     path.write_text("key = 1\n")
-    conf = Confease(path, parser=Toml, __backup__=True)
+    conf = Confease(path, parser=Toml, backup=True)
     conf.set("key", None)
     with pytest.raises(ValueError):
         conf.save()
@@ -211,7 +211,7 @@ def test_invalid_candidates_do_not_create_backups(tmp_path):
     assert snapshots(path) == []
     template = tmp_path / "template.toml"
     template.write_text("key = 2\n")
-    conf = Confease(path, parser=Toml, template=template, __backup__=True)
+    conf = Confease(path, parser=Toml, template=template, backup=True)
     template.write_text("key = [\n")
     with pytest.raises(ValueError):
         conf.reset()
