@@ -7,6 +7,8 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## [4.0.0] - 2026-10-10
+
 ### Added
 
 - Add keyword-only `Confease(..., autoload=False)` for deferred destination loading. First ordinary reads, mutations, saves, and source overlays initialize existing file values before use; failed loads preserve uninitialized state for retry. Default construction remains eager, and deferred loading interoperates with `reload=True`.
