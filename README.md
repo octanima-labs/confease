@@ -176,6 +176,34 @@ other input types raise `TypeError`. Configuration keys can use any constructor
 option name, including `path`, `backup`, or `items`, without changing those options.
 Values retain their Python types and participate as default-origin entries.
 
+Empty dictionaries declare sections that can be populated later, including by a
+loaded user configuration:
+
+```python
+conf = Confease(items={"plugins": {}})
+conf["plugins.example"] = {"enabled": True}
+assert conf["plugins"] == {"example": {"enabled": True}}
+
+conf.set("plugins", {})  # Empty merge: existing descendants are retained.
+conf.reset()            # Restore the original empty default in memory.
+assert conf["plugins"] == {}
+```
+
+These rules apply at every nesting depth. Empty sections retain their presence and
+source origin while empty; after population, individual descendants carry their
+own origins and participate in normal leaf precedence and user-only persistence.
+An empty section does not block additions from a lower-priority source. Environment
+overlays still look up only known keys: a mapping value at a known empty section can
+populate it, but unknown dotted environment names are not discovered.
+
+Mapping/non-mapping changes raise `ValueError`: neither `a = 2` followed by
+`a.b = "hello"` nor replacing `a = {}` with `a = 2` is allowed. Ordinary leaf
+type changes, such as `2` to `"hello"`, remain valid. To deliberately redefine a
+section as a value (or the reverse), call `conf.delete("a")` before setting it
+again. Empty mapping assignments merge rather than clear sections; use deletion
+to remove their contents. A rejected mapping assignment or individual source
+overlay preserves the prior effective values and origins.
+
 #### Constructor Migration
 
 The constructor now separates defaults from controls. Replace old calls as follows:

@@ -1,7 +1,7 @@
 """Format-independent configuration paths and canonical nested mappings.
 
-Dots separate path segments. Lists are whole values; empty mappings are
-terminals so they retain both their presence and their source origin.
+Dots separate path segments. Lists are whole values; empty mappings retain
+their presence until compatible descendants populate them.
 """
 
 from collections.abc import Iterable, Mapping
@@ -58,8 +58,28 @@ def flatten_items(items: Iterable[tuple[str, Any]]) -> dict[str, Any]:
 
     for key, value in items:
         visit(key, value)
-    validate_paths(flat)
-    return flat
+    return normalize_flat(flat)
+
+
+def normalize_flat(data: Mapping[str, Any]) -> dict[str, Any]:
+    """Validate flat values and remove empty placeholders with descendants."""
+    sections: set[str] = set()
+    for key in data:
+        validate_key(key)
+        parts = key.split(".")
+        sections.update(".".join(parts[:index]) for index in range(1, len(parts)))
+    for key in sections & data.keys():
+        if not isinstance(data[key], Mapping):
+            raise ValueError(f"Configuration key collides with nested section: {key}")  # noqa: TRY004 - structural path conflict, not an unsupported Python type
+    return {key: value for key, value in data.items() if key not in sections}
+
+
+def validate_merge(existing: Mapping[str, Any], incoming: Mapping[str, Any]) -> None:
+    """Reject structural changes before replacement or precedence filtering."""
+    for key in existing.keys() & incoming.keys():
+        if isinstance(existing[key], Mapping) != isinstance(incoming[key], Mapping):
+            raise ValueError(f"Configuration key collides with nested section: {key}")
+    normalize_flat({**existing, **incoming})
 
 
 def flatten(data: Mapping[str, Any]) -> dict[str, Any]:
@@ -69,7 +89,7 @@ def flatten(data: Mapping[str, Any]) -> dict[str, Any]:
 
 def nest(data: Mapping[str, Any]) -> dict[str, Any]:
     """Reconstruct a nested mapping from validated terminal paths."""
-    validate_paths(data)
+    data = normalize_flat(data)
     nested: dict[str, Any] = {}
     for key, value in data.items():
         parts = key.split(".")

@@ -19,7 +19,14 @@ from edital import TuiEditor
 from confease.backups import create_backup, latest_backup
 from confease.documents import install_draft
 from confease.editing import install_text, read_text, text_validator
-from confease.mappings import flatten, nest, validate_key, validate_paths
+from confease.mappings import (
+    flatten,
+    nest,
+    normalize_flat,
+    validate_key,
+    validate_merge,
+    validate_paths,
+)
 from confease.parsers import PARSER_CLASSES, PARSERS, Parser, Yaml
 
 CLI = 'cli' # cli params
@@ -106,7 +113,9 @@ class Confease:
     define the same key.
 
     Nested mappings support arbitrary depth and are flattened into dotted
-    ``Confitem`` terminals internally, including empty mappings. Parsers encode
+    ``Confitem`` leaves internally, with placeholders for empty mappings until
+    descendants populate them. Mapping/non-mapping structural changes are
+    rejected, while ordinary leaf type changes remain valid. Parsers encode
     hierarchy for their format and return canonical nested mappings on load.
     Dots are reserved path separators; lists remain whole values.
     """
@@ -248,13 +257,6 @@ class Confease:
         """Reconstruct arbitrary-depth sections from dotted terminal paths."""
         return nest(data)
 
-    def _ensure_key_does_not_collide(self, key: str):
-        """Reject setting a key that conflicts with existing scalar or section entries."""
-        self._validate_key(key)
-        if self._entries is None:
-            return
-        validate_paths([entry.key for entry in self._entries if entry.key != key] + [key])
-
     def _set_item(self, key: str, value: Any, origin: str, *, force: bool = False):
         """Set an item if allowed by precedence, or always when forced."""
         if self._entries is None:
@@ -262,15 +264,21 @@ class Confease:
         if self._entries is None:
             self._entries = []
 
-        self._ensure_key_does_not_collide(key)
-        incoming = Confitem(key, value, origin)
+        self._entries = self._merge_entries(self._entries, {key: value}, origin, force=force)
 
-        for index, entry in enumerate(self._entries):
-            if entry == key:
-                if force or self._origin_priority(incoming.origin) <= self._origin_priority(entry.origin):
-                    self._entries[index] = incoming
-                return
-        self._entries.append(incoming)
+    def _merge_entries(self, entries: list[Confitem], data: Mapping[str, Any],
+                       origin: str, *, force: bool = False) -> list[Confitem]:
+        """Stage a structurally compatible overlay before publishing any leaves."""
+        incoming = self._flatten_mapping(data)
+        current = {entry.key: entry for entry in entries}
+        validate_merge({key: entry.value for key, entry in current.items()}, incoming)
+        for key, value in incoming.items():
+            previous = current.get(key)
+            if (previous is None or force
+                    or self._origin_priority(origin) <= self._origin_priority(previous.origin)):
+                current[key] = Confitem(key, value, origin)
+        effective = normalize_flat({key: entry.value for key, entry in current.items()})
+        return [current[key] for key in effective]
     
     def load(self, path: str | Path | None = None):
         """Load configuration values from a file as user-origin entries.
@@ -301,11 +309,7 @@ class Confease:
 
     def _entries_for_load(self, data: Mapping[str, Any]) -> list[Confitem]:
         """Build and validate loaded entries without changing live state."""
-        entries = {entry.key: entry for entry in self._defaults}
-        entries.update({key: Confitem(key, value, USR)
-                        for key, value in self._flatten_mapping(data).items()})
-        self._ensure_no_key_collisions(entries.keys())
-        return list(entries.values())
+        return self._merge_entries(self._defaults, data, USR, force=True)
 
     def _initialize_entries(self):
         """Initialize defaults in memory without invoking persistent reset."""
@@ -523,18 +527,19 @@ class Confease:
             key: Scalar key, dotted nested key, or section name when ``value``
                 is an arbitrary-depth mapping.
             value: Python value to store. Nested dictionaries are flattened into
-                dotted leaves.
+                dotted leaves and merged with compatible sections. Empty mappings
+                can acquire descendants; assigning an empty mapping to a populated
+                section preserves its descendants. Delete a path before changing
+                between mapping and non-mapping structure. Other leaf type changes
+                remain allowed.
 
         Raises:
             ValueError: If paths contain empty segments, duplicate logical keys,
-                or terminal/section collisions at any depth.
+                or mapping/non-mapping conflicts at any depth. Rejected mapping
+                assignments leave effective entries unchanged.
         """
         self._ensure_entries()
-        items = self._flatten_mapping({key: value})
-        existing = {entry.key for entry in self._entries or []}
-        self._ensure_no_key_collisions(existing | items.keys())
-        for item_key, item_value in items.items():
-            self._set_item(item_key, item_value, USR, force=True)
+        self._entries = self._merge_entries(self._entries or [], {key: value}, USR, force=True)
         if self._reload:
             self.save()
 
@@ -751,8 +756,7 @@ class Confease:
                 raise ValueError(f"Unknown parser for '{load_path}'. Allowed: {PARSERS}")
 
             origin = USR if load_path.resolve().is_relative_to(Path.home().resolve()) else SYS
-            for key, value in self._flatten_mapping(parser.load(load_path)).items():
-                self._set_item(key, value, origin)
+            self._entries = self._merge_entries(self._entries or [], parser.load(load_path), origin)
     
     def reload_cli(self, namespace: Namespace):
         """Load non-``None`` argparse namespace values as CLI-origin entries.
@@ -763,8 +767,7 @@ class Confease:
         """
         self._ensure_entries()
         data = {key: value for key, value in vars(namespace).items() if value is not None}
-        for key, value in self._flatten_mapping(data).items():
-            self._set_item(key, value, CLI)
+        self._entries = self._merge_entries(self._entries or [], data, CLI)
 
     def reload_env(self):
         """Load known environment variables as ENV-origin entries.
@@ -776,6 +779,6 @@ class Confease:
         """
         self._ensure_entries()
         entries = self._entries or []
-        for key in {entry.key for entry in entries}:
-            if key in os.environ:
-                self._set_item(key, yaml.safe_load(os.environ[key]), ENV)
+        data = {key: yaml.safe_load(os.environ[key])
+                for key in {entry.key for entry in entries} if key in os.environ}
+        self._entries = self._merge_entries(entries, data, ENV)
