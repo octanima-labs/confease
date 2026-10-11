@@ -20,6 +20,7 @@ from confease.editing import (
     text_validator,
     validate_text,
 )
+from confease.mappings import normalize_flat, validate_merge
 from confease.model import Confease
 from confease.parsers import PARSER_CLASSES, Parser, Yaml
 
@@ -71,15 +72,16 @@ def resolve_format(path: Path, explicit: str | None, *, initializing: bool) -> t
 
 def assignments(items: Sequence[str]) -> dict[str, Any]:
     """Parse typed assignments; the last assignment to a leaf wins."""
-    leaves = {}
+    leaves: dict[str, Any] = {}
     for item in items:
         key, separator, text = item.partition("=")
         if not separator or not key:
             raise ValueError(f"Expected a nonempty KEY=VALUE assignment, received {item!r}")
         value = yaml.safe_load(text)
-        leaves.update(Confease._flatten_mapping({key: value}))
-    Confease._ensure_no_key_collisions(leaves)
-    return leaves
+        incoming = Confease._flatten_mapping({key: value})
+        validate_merge(leaves, incoming)
+        leaves.update(incoming)
+    return normalize_flat(leaves)
 
 
 def scripted_edit(path: Path, parser: type[Parser], updates: Sequence[str], deletes: Sequence[str],

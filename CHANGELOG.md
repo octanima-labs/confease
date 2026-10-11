@@ -7,6 +7,21 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## [6.0.0] - 2026-10-11
+
+### Fixed
+
+- Allow empty mapping defaults and existing empty sections to acquire descendants through dotted or mapping assignments and file, CLI, and known-key environment overlays, preserving per-leaf origins, reset defaults, and user-only persistence.
+- Accept compatible empty parent declarations alongside descendant paths in either order across built-in parser inputs and scripted CLI assignments. Empty mappings merge into populated sections without clearing or hiding descendants.
+
+### Changed
+
+- Validate complete mapping assignments and individual source overlays before publishing changes, preserving prior effective values and origins when structural conflicts are rejected.
+
+### Breaking Changes
+
+- Reject changes between mapping and non-mapping structure, including replacing an empty mapping with a scalar or the reverse, with `ValueError`. Delete the path before redefining its structure. Ordinary non-mapping leaf type changes remain supported.
+
 ## [5.0.0] - 2026-10-10
 
 ### Added

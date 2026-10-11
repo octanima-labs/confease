@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "confease"
-version = "5.0.0"
+version = "6.0.0"
 description = "Small Python configuration helper with predictable source precedence"
 readme = "README.md"
 license = "MIT"
