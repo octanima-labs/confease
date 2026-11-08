@@ -7,6 +7,12 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## [6.0.1] - 2026-11-09
+
+### Changed
+
+- Upgrade the embedded editor dependency to Edital 0.3.0 and allow compatible releases below 1.0.
+
 ## [6.0.0] - 2026-10-11
 
 ### Fixed
